@@ -55,8 +55,11 @@ README_TEXT = """
 - State machine observability (`NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`) with explanation traces.
 - Monte Carlo experiment lab to quantify stability and switching behavior.
 - Exportable telemetry and experiment CSV for customer analysis workflows.
+- Separate onboarding page with optional Google sign-in and demo fallback credentials.
 
-## Demo Access
+## Access
+- Preferred: Sign in with Google (OIDC) when deployment auth is configured.
+- Fallback demo accounts:
 - `demo.operator@ods.local` / `ODS-demo-2026!`
 - `mission.analyst@ods.local` / `ODS-analyst-2026!`
 
@@ -206,6 +209,8 @@ def ensure_state_defaults() -> None:
         st.session_state["demo_user_email"] = DEMO_CREDENTIALS[0]["email"]
     if "demo_user_password" not in st.session_state:
         st.session_state["demo_user_password"] = ""
+    if "app_page" not in st.session_state:
+        st.session_state["app_page"] = "Client Onboarding"
     if "settings_loaded" not in st.session_state:
         apply_preset(st.session_state["preset_name"])
         st.session_state["settings_loaded"] = True
@@ -616,12 +621,45 @@ def check_demo_login(email: str, password: str) -> bool:
     return False
 
 
+def google_auth_supported() -> bool:
+    return all(hasattr(st, attr) for attr in ["login", "user", "logout"])
+
+
+def google_auth_context() -> Tuple[bool, str]:
+    if not google_auth_supported():
+        return False, ""
+
+    try:
+        logged_in = bool(getattr(st.user, "is_logged_in", False))
+    except Exception:
+        return False, ""
+
+    if not logged_in:
+        return False, ""
+
+    identity = ""
+    for key in ["email", "name", "sub"]:
+        try:
+            value = st.user.get(key, "")
+        except Exception:
+            value = ""
+        if value:
+            identity = str(value)
+            break
+    return True, identity
+
+
+def user_authenticated() -> bool:
+    google_logged_in, _ = google_auth_context()
+    return google_logged_in or bool(st.session_state.get("demo_authenticated", False))
+
+
 def onboarding_steps_df() -> pd.DataFrame:
     rows = [
         {
             "step": 1,
-            "action": "Sign in with demo credentials",
-            "outcome": "Unlocks guided onboarding for evaluation users.",
+            "action": "Sign in with Google (or use demo fallback)",
+            "outcome": "Unlocks mission console features for evaluation users.",
         },
         {
             "step": 2,
@@ -779,10 +817,71 @@ def state_badge(state: str) -> str:
 
 
 def get_credential_reference_text() -> str:
-    lines = ["Demo credentials for onboarding:"]
+    lines = ["Fallback demo credentials:"]
     for cred in DEMO_CREDENTIALS:
         lines.append(f"- {cred['role']}: {cred['email']} / {cred['password']}")
     return "\n".join(lines)
+
+
+def render_onboarding_page() -> None:
+    st.subheader("Client Onboarding")
+    st.write(
+        "Use this page to sign in, review workflow steps, and then switch to the mission console for scenario runs."
+    )
+
+    c_left, c_right = st.columns([1, 1])
+    google_logged_in, google_identity = google_auth_context()
+
+    with c_left:
+        st.markdown("**Access**")
+        if google_auth_supported():
+            st.caption("Google Sign-In (OIDC)")
+            if google_logged_in:
+                identity = google_identity if google_identity else "authenticated Google user"
+                st.success(f"Signed in with Google as `{identity}`.")
+                if st.button("Sign Out of Google", key="google_logout_button"):
+                    st.logout()
+            else:
+                if st.button("Sign In with Google", type="primary", key="google_login_button"):
+                    try:
+                        st.login("google")
+                    except TypeError:
+                        try:
+                            st.login()
+                        except Exception as exc:
+                            st.warning(f"Google sign-in is not configured yet: {exc}")
+                    except Exception as exc:
+                        st.warning(f"Google sign-in is not configured yet: {exc}")
+        else:
+            st.info("Google sign-in is not available in this runtime.")
+
+        st.divider()
+        st.markdown("**Fallback Demo Access**")
+        st.code(get_credential_reference_text(), language="text")
+        with st.form("demo_login_form"):
+            email = st.text_input("Email", key="demo_user_email")
+            password = st.text_input("Password", type="password", key="demo_user_password")
+            submit = st.form_submit_button("Sign In with Demo Credentials")
+        if submit:
+            st.session_state["demo_authenticated"] = check_demo_login(email, password)
+        if st.session_state["demo_authenticated"]:
+            st.success("Signed in with demo credentials.")
+        else:
+            st.info("Use one of the fallback demo credentials above.")
+
+    with c_right:
+        st.markdown("**Onboarding Workflow**")
+        st.dataframe(onboarding_steps_df(), use_container_width=True, height=260)
+        st.markdown("**Quick Start**")
+        st.write("1. Authenticate on this page.")
+        st.write("2. Switch page to `Mission Console` from the sidebar.")
+        st.write("3. Apply `Balanced Demo` and inspect transitions in `Live Simulator`.")
+        st.write("4. Run Monte Carlo in `Experiment Lab` and export results.")
+
+    if user_authenticated():
+        if st.button("Open Mission Console", key="open_console_button"):
+            st.session_state["app_page"] = "Mission Console"
+            st.rerun()
 
 
 def main() -> None:
@@ -791,53 +890,81 @@ def main() -> None:
     st.title("Managed Onboard Compute Payload (MOCP) - Prototype MVP")
     st.caption(APP_VALUE_PROP)
 
+    google_logged_in, google_identity = google_auth_context()
+    demo_logged_in = bool(st.session_state.get("demo_authenticated", False))
+
     with st.sidebar:
-        st.header("Scenario Presets")
-        preset_name = st.selectbox("Preset", options=list(PRESETS.keys()), key="preset_name")
-        if st.button("Apply Selected Preset"):
-            apply_preset(preset_name)
-            st.rerun()
+        st.header("Navigation")
+        st.radio("Page", options=["Mission Console", "Client Onboarding"], key="app_page")
 
-        st.divider()
-        st.header("Simulation Controls")
-        st.slider("Simulation length (steps)", min_value=60, max_value=720, step=10, key="sim_steps")
-        st.number_input("Random seed", min_value=0, max_value=10000, step=1, key="sim_seed")
-        st.slider("Noise level", min_value=0.0, max_value=20.0, step=0.5, key="sim_noise")
+        if google_logged_in:
+            identity = google_identity if google_identity else "authenticated Google user"
+            st.success(f"Signed in (Google): {identity}")
+        elif demo_logged_in:
+            st.success("Signed in (demo credentials)")
+        else:
+            st.warning("Not signed in")
 
-        st.subheader("Eclipse")
-        st.checkbox("Enable eclipse cycle", key="sim_enable_eclipse")
-        st.slider("Eclipse period (steps)", min_value=30, max_value=180, step=5, key="sim_eclipse_period")
-        st.slider("Eclipse duration (steps)", min_value=5, max_value=80, step=1, key="sim_eclipse_duration")
+        if st.session_state["app_page"] == "Mission Console":
+            st.divider()
+            st.header("Scenario Presets")
+            preset_name = st.selectbox("Preset", options=list(PRESETS.keys()), key="preset_name")
+            if st.button("Apply Selected Preset"):
+                apply_preset(preset_name)
+                st.rerun()
 
-        st.subheader("Fault Injection")
-        st.selectbox("Manual fault", options=["none", "minor", "critical"], key="sim_manual_fault")
-        if st.session_state["sim_manual_fault_step"] > st.session_state["sim_steps"] - 1:
-            st.session_state["sim_manual_fault_step"] = st.session_state["sim_steps"] - 1
-        st.slider(
-            "Manual fault step",
-            min_value=0,
-            max_value=st.session_state["sim_steps"] - 1,
-            step=1,
-            key="sim_manual_fault_step",
-        )
-        st.slider(
-            "Random fault rate (faults/hour)",
-            min_value=0.0,
-            max_value=5.0,
-            step=0.1,
-            key="sim_random_fault_rate",
-        )
+            st.divider()
+            st.header("Simulation Controls")
+            st.slider("Simulation length (steps)", min_value=60, max_value=720, step=10, key="sim_steps")
+            st.number_input("Random seed", min_value=0, max_value=10000, step=1, key="sim_seed")
+            st.slider("Noise level", min_value=0.0, max_value=20.0, step=0.5, key="sim_noise")
 
-        st.subheader("Policy + Stability")
-        st.selectbox(
-            "Policy mode",
-            options=["rule_based", "risk_scored"],
-            key="sim_policy_mode",
-            help="rule_based uses explicit thresholds; risk_scored uses weighted risk factors.",
-        )
-        st.checkbox("Use hysteresis / minimum dwell", key="sim_use_hysteresis")
-        st.slider("Min dwell steps", min_value=1, max_value=30, step=1, key="sim_min_dwell")
-        st.slider("Recover hold steps", min_value=1, max_value=30, step=1, key="sim_recover_hold")
+            st.subheader("Eclipse")
+            st.checkbox("Enable eclipse cycle", key="sim_enable_eclipse")
+            st.slider("Eclipse period (steps)", min_value=30, max_value=180, step=5, key="sim_eclipse_period")
+            st.slider("Eclipse duration (steps)", min_value=5, max_value=80, step=1, key="sim_eclipse_duration")
+
+            st.subheader("Fault Injection")
+            st.selectbox("Manual fault", options=["none", "minor", "critical"], key="sim_manual_fault")
+            if st.session_state["sim_manual_fault_step"] > st.session_state["sim_steps"] - 1:
+                st.session_state["sim_manual_fault_step"] = st.session_state["sim_steps"] - 1
+            st.slider(
+                "Manual fault step",
+                min_value=0,
+                max_value=st.session_state["sim_steps"] - 1,
+                step=1,
+                key="sim_manual_fault_step",
+            )
+            st.slider(
+                "Random fault rate (faults/hour)",
+                min_value=0.0,
+                max_value=5.0,
+                step=0.1,
+                key="sim_random_fault_rate",
+            )
+
+            st.subheader("Policy + Stability")
+            st.selectbox(
+                "Policy mode",
+                options=["rule_based", "risk_scored"],
+                key="sim_policy_mode",
+                help="rule_based uses explicit thresholds; risk_scored uses weighted risk factors.",
+            )
+            st.checkbox("Use hysteresis / minimum dwell", key="sim_use_hysteresis")
+            st.slider("Min dwell steps", min_value=1, max_value=30, step=1, key="sim_min_dwell")
+            st.slider("Recover hold steps", min_value=1, max_value=30, step=1, key="sim_recover_hold")
+        else:
+            st.divider()
+            st.caption("Complete onboarding first, then switch to Mission Console.")
+
+    if st.session_state["app_page"] == "Client Onboarding":
+        render_onboarding_page()
+        return
+
+    if not user_authenticated():
+        st.warning("Mission Console is gated behind sign-in.")
+        st.info("Open `Client Onboarding` from the sidebar to authenticate.")
+        return
 
     cfg = SimConfig(
         steps=int(st.session_state["sim_steps"]),
@@ -858,50 +985,11 @@ def main() -> None:
     telemetry = simulate_telemetry(cfg)
     faults = generate_faults(cfg, telemetry)
     telemetry, transitions, timeline = run_state_machine(telemetry, faults, cfg)
-
     state_steps = find_state_steps(telemetry)
     if st.session_state["focus_step"] > cfg.steps - 1:
         st.session_state["focus_step"] = cfg.steps - 1
 
-    tab_onboard, tab_sim, tab_exp = st.tabs(
-        [
-            "Client Onboarding",
-            "Live Simulator",
-            "Experiment Lab",
-        ]
-    )
-
-    with tab_onboard:
-        st.subheader("Welcome")
-        st.write(
-            "This environment helps mission teams evaluate constrained compute operations, "
-            "safety transitions, and policy stability before pilot integration."
-        )
-
-        c_left, c_right = st.columns([1, 1])
-        with c_left:
-            st.markdown("**Evaluation Demo Access**")
-            st.code(get_credential_reference_text(), language="text")
-            with st.form("demo_login_form"):
-                email = st.text_input("Email", key="demo_user_email")
-                password = st.text_input("Password", type="password", key="demo_user_password")
-                submit = st.form_submit_button("Sign In")
-            if submit:
-                st.session_state["demo_authenticated"] = check_demo_login(email, password)
-            if st.session_state["demo_authenticated"]:
-                st.success("Signed in. You can now run scenarios and experiments.")
-            else:
-                st.info("Use one of the demo credentials above to sign in.")
-
-        with c_right:
-            st.markdown("**Onboarding Workflow**")
-            st.dataframe(onboarding_steps_df(), use_container_width=True, height=250)
-
-        st.markdown("**Quick Start**")
-        st.write("1. Apply `Balanced Demo` in the sidebar.")
-        st.write("2. Go to `Live Simulator` and inspect state transitions.")
-        st.write("3. Go to `Experiment Lab` and run Monte Carlo comparisons.")
-        st.write("4. Export CSV artifacts for review.")
+    tab_sim, tab_exp = st.tabs(["Live Simulator", "Experiment Lab"])
 
     with tab_sim:
         jump_cols = st.columns([2, 1])

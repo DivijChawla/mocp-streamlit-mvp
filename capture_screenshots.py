@@ -25,6 +25,11 @@ def click_apply(page) -> None:
     page.wait_for_timeout(1400)
 
 
+def choose_page(page, page_name: str) -> None:
+    page.get_by_role("radio", name=page_name).check(timeout=10000)
+    page.wait_for_timeout(800)
+
+
 def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -38,13 +43,13 @@ def main() -> None:
         page.wait_for_timeout(1000)
         page.get_by_label("Email").fill("demo.operator@ods.local")
         page.get_by_role("textbox", name="Password").fill("ODS-demo-2026!")
-        page.get_by_role("button", name="Sign In").click(timeout=10000)
+        page.get_by_role("button", name="Sign In with Demo Credentials").click(timeout=10000)
         page.wait_for_timeout(1200)
         page.screenshot(path=str(onboarding_out), full_page=True)
         print(f"saved {onboarding_out}")
 
-        # Switch to simulator tab for state captures
-        page.get_by_role("tab", name="Live Simulator").click(timeout=10000)
+        # Switch to mission console page for state captures
+        choose_page(page, "Mission Console")
         page.wait_for_timeout(1200)
 
         for preset, state, filename in TARGETS:

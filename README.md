@@ -24,9 +24,13 @@ Core states:
 - Explainability panel for active transition rules.
 - Event timeline and transition logs.
 - Monte Carlo experiment lab with CSV exports.
+- Separate onboarding page from mission console for cleaner UI.
 
-## Demo credentials
-Use these demo accounts in the in-app onboarding tab:
+## Access options
+Preferred in hosted environments:
+- Google sign-in via Streamlit OIDC (`st.login` / `st.user` / `st.logout`) when auth secrets are configured.
+
+Fallback demo accounts:
 - Operator: `demo.operator@ods.local` / `ODS-demo-2026!`
 - Mission Analyst: `mission.analyst@ods.local` / `ODS-analyst-2026!`
 
@@ -37,11 +41,18 @@ streamlit run app.py
 ```
 
 ## Onboarding flow
-1. Open the `Client Onboarding` tab.
-2. Sign in with one of the demo credentials below.
-3. Apply a scenario preset from the sidebar.
-4. Review transitions in `Live Simulator`.
-5. Run policy comparisons in `Experiment Lab`.
+1. Open the `Client Onboarding` page.
+2. Sign in with Google (if configured) or use demo fallback credentials.
+3. Switch sidebar page to `Mission Console`.
+4. Apply a scenario preset from the sidebar.
+5. Review transitions in `Live Simulator`.
+6. Run policy comparisons in `Experiment Lab`.
+
+## Optional Google sign-in setup
+The app is already wired for Streamlit's built-in OIDC login.
+- Configure OIDC provider details in deployment secrets.
+- Once configured, `Sign In with Google` becomes active on onboarding.
+- No additional Python dependency is required.
 
 ## Reproducible evaluation suite
 ```bash
