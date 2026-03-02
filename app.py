@@ -42,7 +42,6 @@ README_TEXT = """
 - State machine observability (`NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`) with explanation traces.
 - Monte Carlo experiment lab to quantify stability and switching behavior.
 - Exportable telemetry and experiment CSV for customer analysis workflows.
-- Separate onboarding page for guided first-time walkthrough.
 
 ## Run Locally (macOS)
 ```bash
@@ -184,9 +183,27 @@ def ensure_state_defaults() -> None:
         st.session_state["focus_step"] = 239
     if "tour_state_select" not in st.session_state:
         st.session_state["tour_state_select"] = "NOMINAL"
-    if "app_page" not in st.session_state:
-        st.session_state["app_page"] = "Mission Console"
+
+    required_sim_keys = [
+        "sim_steps",
+        "sim_seed",
+        "sim_noise",
+        "sim_enable_eclipse",
+        "sim_eclipse_period",
+        "sim_eclipse_duration",
+        "sim_manual_fault",
+        "sim_manual_fault_step",
+        "sim_random_fault_rate",
+        "sim_use_hysteresis",
+        "sim_min_dwell",
+        "sim_recover_hold",
+        "sim_policy_mode",
+    ]
+
     if "settings_loaded" not in st.session_state:
+        st.session_state["settings_loaded"] = False
+
+    if not st.session_state["settings_loaded"] or any(key not in st.session_state for key in required_sim_keys):
         apply_preset(st.session_state["preset_name"])
         st.session_state["settings_loaded"] = True
 
@@ -589,37 +606,6 @@ def find_state_steps(telemetry: pd.DataFrame) -> Dict[str, Optional[int]]:
     return out
 
 
-def onboarding_steps_df() -> pd.DataFrame:
-    rows = [
-        {
-            "step": 1,
-            "action": "Open onboarding overview",
-            "outcome": "Introduces scenario workflow and expected outcomes.",
-        },
-        {
-            "step": 2,
-            "action": "Choose scenario preset",
-            "outcome": "Loads stable baseline settings for reproducible runs.",
-        },
-        {
-            "step": 3,
-            "action": "Run simulator and inspect state transitions",
-            "outcome": "Explains why state changes happen and when safety escalates.",
-        },
-        {
-            "step": 4,
-            "action": "Use experiment lab",
-            "outcome": "Compares policy modes and hysteresis impact across many seeds.",
-        },
-        {
-            "step": 5,
-            "action": "Export CSV artifacts",
-            "outcome": "Generates evidence for customer review and pilot discussions.",
-        },
-    ]
-    return pd.DataFrame(rows)
-
-
 def make_combined_export(telemetry: pd.DataFrame, timeline: pd.DataFrame) -> pd.DataFrame:
     base_cols = [
         "record_type",
@@ -751,24 +737,6 @@ def state_badge(state: str) -> str:
     """
 
 
-def render_onboarding_page() -> None:
-    st.subheader("Client Onboarding")
-    st.write(
-        "Use this page to review workflow steps, then switch to the mission console for scenario runs."
-    )
-
-    st.markdown("**Onboarding Workflow**")
-    st.dataframe(onboarding_steps_df(), use_container_width=True, height=260)
-    st.markdown("**Quick Start**")
-    st.write("1. Switch page to `Mission Console` from the sidebar.")
-    st.write("2. Apply `Balanced Demo` and inspect transitions in `Live Simulator`.")
-    st.write("3. Run Monte Carlo in `Experiment Lab` and export results.")
-
-    if st.button("Open Mission Console", key="open_console_button"):
-        st.session_state["app_page"] = "Mission Console"
-        st.rerun()
-
-
 def main() -> None:
     ensure_state_defaults()
 
@@ -776,64 +744,52 @@ def main() -> None:
     st.caption(APP_VALUE_PROP)
 
     with st.sidebar:
-        st.header("Navigation")
-        st.radio("Page", options=["Mission Console", "Client Onboarding"], key="app_page")
+        st.header("Scenario Presets")
+        preset_name = st.selectbox("Preset", options=list(PRESETS.keys()), key="preset_name")
+        if st.button("Apply Selected Preset"):
+            apply_preset(preset_name)
+            st.rerun()
 
-        if st.session_state["app_page"] == "Mission Console":
-            st.divider()
-            st.header("Scenario Presets")
-            preset_name = st.selectbox("Preset", options=list(PRESETS.keys()), key="preset_name")
-            if st.button("Apply Selected Preset"):
-                apply_preset(preset_name)
-                st.rerun()
+        st.divider()
+        st.header("Simulation Controls")
+        st.slider("Simulation length (steps)", min_value=60, max_value=720, step=10, key="sim_steps")
+        st.number_input("Random seed", min_value=0, max_value=10000, step=1, key="sim_seed")
+        st.slider("Noise level", min_value=0.0, max_value=20.0, step=0.5, key="sim_noise")
 
-            st.divider()
-            st.header("Simulation Controls")
-            st.slider("Simulation length (steps)", min_value=60, max_value=720, step=10, key="sim_steps")
-            st.number_input("Random seed", min_value=0, max_value=10000, step=1, key="sim_seed")
-            st.slider("Noise level", min_value=0.0, max_value=20.0, step=0.5, key="sim_noise")
+        st.subheader("Eclipse")
+        st.checkbox("Enable eclipse cycle", key="sim_enable_eclipse")
+        st.slider("Eclipse period (steps)", min_value=30, max_value=180, step=5, key="sim_eclipse_period")
+        st.slider("Eclipse duration (steps)", min_value=5, max_value=80, step=1, key="sim_eclipse_duration")
 
-            st.subheader("Eclipse")
-            st.checkbox("Enable eclipse cycle", key="sim_enable_eclipse")
-            st.slider("Eclipse period (steps)", min_value=30, max_value=180, step=5, key="sim_eclipse_period")
-            st.slider("Eclipse duration (steps)", min_value=5, max_value=80, step=1, key="sim_eclipse_duration")
+        st.subheader("Fault Injection")
+        st.selectbox("Manual fault", options=["none", "minor", "critical"], key="sim_manual_fault")
+        if st.session_state["sim_manual_fault_step"] > st.session_state["sim_steps"] - 1:
+            st.session_state["sim_manual_fault_step"] = st.session_state["sim_steps"] - 1
+        st.slider(
+            "Manual fault step",
+            min_value=0,
+            max_value=st.session_state["sim_steps"] - 1,
+            step=1,
+            key="sim_manual_fault_step",
+        )
+        st.slider(
+            "Random fault rate (faults/hour)",
+            min_value=0.0,
+            max_value=5.0,
+            step=0.1,
+            key="sim_random_fault_rate",
+        )
 
-            st.subheader("Fault Injection")
-            st.selectbox("Manual fault", options=["none", "minor", "critical"], key="sim_manual_fault")
-            if st.session_state["sim_manual_fault_step"] > st.session_state["sim_steps"] - 1:
-                st.session_state["sim_manual_fault_step"] = st.session_state["sim_steps"] - 1
-            st.slider(
-                "Manual fault step",
-                min_value=0,
-                max_value=st.session_state["sim_steps"] - 1,
-                step=1,
-                key="sim_manual_fault_step",
-            )
-            st.slider(
-                "Random fault rate (faults/hour)",
-                min_value=0.0,
-                max_value=5.0,
-                step=0.1,
-                key="sim_random_fault_rate",
-            )
-
-            st.subheader("Policy + Stability")
-            st.selectbox(
-                "Policy mode",
-                options=["rule_based", "risk_scored"],
-                key="sim_policy_mode",
-                help="rule_based uses explicit thresholds; risk_scored uses weighted risk factors.",
-            )
-            st.checkbox("Use hysteresis / minimum dwell", key="sim_use_hysteresis")
-            st.slider("Min dwell steps", min_value=1, max_value=30, step=1, key="sim_min_dwell")
-            st.slider("Recover hold steps", min_value=1, max_value=30, step=1, key="sim_recover_hold")
-        else:
-            st.divider()
-            st.caption("Complete onboarding first, then switch to Mission Console.")
-
-    if st.session_state["app_page"] == "Client Onboarding":
-        render_onboarding_page()
-        return
+        st.subheader("Policy + Stability")
+        st.selectbox(
+            "Policy mode",
+            options=["rule_based", "risk_scored"],
+            key="sim_policy_mode",
+            help="rule_based uses explicit thresholds; risk_scored uses weighted risk factors.",
+        )
+        st.checkbox("Use hysteresis / minimum dwell", key="sim_use_hysteresis")
+        st.slider("Min dwell steps", min_value=1, max_value=30, step=1, key="sim_min_dwell")
+        st.slider("Recover hold steps", min_value=1, max_value=30, step=1, key="sim_recover_hold")
 
     cfg = SimConfig(
         steps=int(st.session_state["sim_steps"]),

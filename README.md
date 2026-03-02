@@ -24,7 +24,6 @@ Core states:
 - Explainability panel for active transition rules.
 - Event timeline and transition logs.
 - Monte Carlo experiment lab with CSV exports.
-- Separate onboarding page from mission console for cleaner UI.
 
 ## Run locally
 ```bash
@@ -32,12 +31,10 @@ pip install streamlit pandas numpy
 streamlit run app.py
 ```
 
-## Onboarding flow
-1. Open the `Client Onboarding` page.
-2. Switch sidebar page to `Mission Console`.
-3. Apply a scenario preset from the sidebar.
-4. Review transitions in `Live Simulator`.
-5. Run policy comparisons in `Experiment Lab`.
+## Quick run flow
+1. Apply a scenario preset from the sidebar.
+2. Review transitions in `Live Simulator`.
+3. Run policy comparisons in `Experiment Lab`.
 
 ## Reproducible evaluation suite
 ```bash
@@ -50,7 +47,6 @@ Outputs:
 
 ## Screenshot set (for reports)
 Manual capture targets:
-- `Client Onboarding` signed-in view.
 - `Nominal Operations` preset + `NOMINAL` jump target.
 - `Throttle Response` preset + `THROTTLE` jump target.
 - `Safe Mode Trigger` preset + `SAFE` jump target.
@@ -66,7 +62,6 @@ python capture_screenshots.py
 ```
 
 Expected output files:
-- `submission_assets/screenshots/00_onboarding.png`
 - `submission_assets/screenshots/01_nominal.png`
 - `submission_assets/screenshots/02_throttle.png`
 - `submission_assets/screenshots/03_safe.png`

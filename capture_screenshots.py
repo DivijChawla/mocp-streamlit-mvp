@@ -25,28 +25,12 @@ def click_apply(page) -> None:
     page.wait_for_timeout(1400)
 
 
-def choose_page(page, page_name: str) -> None:
-    page.get_by_role("radio", name=page_name).check(timeout=10000)
-    page.wait_for_timeout(800)
-
-
 def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1600, "height": 2200})
         page.goto(APP_URL, wait_until="networkidle", timeout=120000)
         page.get_by_text("Managed Onboard Compute Payload (MOCP) - Prototype MVP").wait_for(timeout=30000)
-
-        # Onboarding page screenshot
-        onboarding_out = OUT / "00_onboarding.png"
-        choose_page(page, "Client Onboarding")
-        page.wait_for_timeout(1000)
-        page.screenshot(path=str(onboarding_out), full_page=True)
-        print(f"saved {onboarding_out}")
-
-        # Switch to mission console page for state captures
-        choose_page(page, "Mission Console")
-        page.wait_for_timeout(1200)
 
         for preset, state, filename in TARGETS:
             # set preset + apply
