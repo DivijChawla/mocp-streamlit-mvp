@@ -28,7 +28,7 @@ README_TEXT = """
 # Managed Onboard Compute Payload (MOCP) Prototype MVP
 
 ## Disclaimer (Read First)
-This app is a **toy simulator for UI/workflow validation only**.
+This app is for **UI/workflow validation only**.
 It is **not flight software**, **not a physics-accurate spacecraft simulator**, and must not be used for mission-critical decisions.
 
 ## What Is Simulated
@@ -425,7 +425,7 @@ def state_badge(state: str) -> str:
 def main() -> None:
     st.title("Managed Onboard Compute Payload (MOCP) - Prototype MVP")
     st.warning(
-        "TOY DEMO ONLY: This simulator is for UI/workflow validation, not flight software or mission operations."
+        "This simulator is for UI/workflow validation, not flight software or mission operations."
     )
 
     with st.sidebar:
