@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import json
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -26,71 +25,46 @@ STATE_COLORS = {
     "RECOVER": "#005f8f",
 }
 
-MVP_ASSUMPTION_TEXT = (
-    "Teams evaluating onboard autonomy will find transparent state transitions and "
-    "reason traces useful for trust and incident triage."
+APP_VALUE_PROP = (
+    "Client preview environment for evaluating onboard safety-state behavior, "
+    "operational explainability, and policy stability under constrained conditions."
 )
 
-SERVICE_BLUEPRINT_ROWS = [
+DEMO_CREDENTIALS = [
     {
-        "phase": "1) Configure Mission Constraints",
-        "user_action": "Set scenario preset, thresholds, noise, eclipse, and fault controls.",
-        "system_action": "Generates synthetic telemetry and initializes state-machine policy.",
-        "mvp_evidence": "Preset + controls panel with deterministic seed replay.",
+        "role": "Operator",
+        "email": "demo.operator@ods.local",
+        "password": "ODS-demo-2026!",
     },
     {
-        "phase": "2) Run Scenario",
-        "user_action": "Execute nominal/minor/critical scenarios.",
-        "system_action": "Evaluates state transitions and logs reason strings each step.",
-        "mvp_evidence": "Current-state card, telemetry chart, transition table.",
-    },
-    {
-        "phase": "3) Investigate Incidents",
-        "user_action": "Inspect event timeline and the explanation panel.",
-        "system_action": "Surfaces active rules/risk factors for the focus step.",
-        "mvp_evidence": "Why-panel + severity-tagged timeline + event log.",
-    },
-    {
-        "phase": "4) Evaluate Robustness",
-        "user_action": "Run Monte Carlo experiment lab across policies and hysteresis settings.",
-        "system_action": "Computes aggregate metrics across many seeds.",
-        "mvp_evidence": "Summary table + CSV downloads.",
-    },
-    {
-        "phase": "5) Package Evidence",
-        "user_action": "Capture screenshots and export artifacts.",
-        "system_action": "Provides screenshot target steps and report/tour assets.",
-        "mvp_evidence": "Screenshot plan table + downloadable tour script/checklists.",
+        "role": "Mission Analyst",
+        "email": "mission.analyst@ods.local",
+        "password": "ODS-analyst-2026!",
     },
 ]
 
 README_TEXT = """
 # Managed Onboard Compute Payload (MOCP) Prototype MVP
 
-## What This MVP Includes
-- Telemetry simulation (`power_watts`, `temp_c`) with periodic signal + noise.
-- Eclipse cycle that changes power and temperature behavior.
-- Fault injection controls (`none`, `minor`, `critical`) + random rate (0-5 faults/hour).
-- Two policy modes:
-  - `rule_based`: explicit threshold rules
-  - `risk_scored`: weighted risk factors converted to states
-- State machine visualization (`NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`) with reason traces.
-- Optional hysteresis/min dwell controls to reduce state flapping.
-- Event timeline, transition log, and telemetry+events CSV export.
-- Monte Carlo experiment lab with aggregate metrics and downloadable CSV.
-- Screenshot planning and downloadable guided demo/tour scripts.
+## Client-Facing Capabilities
+- Live mission-scenario simulation for power/thermal and eclipse constraints.
+- Fault injection controls (`none`, `minor`, `critical`) + random event rates.
+- Dual policy evaluation:
+  - `rule_based`: explicit threshold policy
+  - `risk_scored`: weighted-factor policy
+- State machine observability (`NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`) with explanation traces.
+- Monte Carlo experiment lab to quantify stability and switching behavior.
+- Exportable telemetry and experiment CSV for customer analysis workflows.
+
+## Demo Access
+- `demo.operator@ods.local` / `ODS-demo-2026!`
+- `mission.analyst@ods.local` / `ODS-analyst-2026!`
 
 ## Run Locally (macOS)
 ```bash
 pip install streamlit pandas numpy
 streamlit run app.py
 ```
-
-## Recommended Submission Artifacts
-1. Live app walkthrough (using preset scenarios).
-2. Four screenshots: NOMINAL / THROTTLE / SAFE / RECOVER.
-3. Service blueprint (table in app + external FigJam).
-4. Monte Carlo summary table + exported metrics CSV.
 """
 
 PRESETS: Dict[str, Dict[str, object]] = {
@@ -109,7 +83,7 @@ PRESETS: Dict[str, Dict[str, object]] = {
         "recover_hold_steps": 5,
         "policy_mode": "rule_based",
     },
-    "Nominal Screenshot": {
+    "Nominal Operations": {
         "steps": 240,
         "seed": 7,
         "noise_level": 2.0,
@@ -124,7 +98,7 @@ PRESETS: Dict[str, Dict[str, object]] = {
         "recover_hold_steps": 5,
         "policy_mode": "rule_based",
     },
-    "Throttle Screenshot": {
+    "Throttle Response": {
         "steps": 240,
         "seed": 9,
         "noise_level": 3.0,
@@ -139,7 +113,7 @@ PRESETS: Dict[str, Dict[str, object]] = {
         "recover_hold_steps": 5,
         "policy_mode": "rule_based",
     },
-    "Safe Screenshot": {
+    "Safe Mode Trigger": {
         "steps": 240,
         "seed": 11,
         "noise_level": 3.0,
@@ -154,7 +128,7 @@ PRESETS: Dict[str, Dict[str, object]] = {
         "recover_hold_steps": 5,
         "policy_mode": "rule_based",
     },
-    "Recover Screenshot": {
+    "Recovery Sequence": {
         "steps": 240,
         "seed": 12,
         "noise_level": 3.0,
@@ -226,6 +200,12 @@ def ensure_state_defaults() -> None:
         st.session_state["focus_step"] = 239
     if "tour_state_select" not in st.session_state:
         st.session_state["tour_state_select"] = "NOMINAL"
+    if "demo_authenticated" not in st.session_state:
+        st.session_state["demo_authenticated"] = False
+    if "demo_user_email" not in st.session_state:
+        st.session_state["demo_user_email"] = DEMO_CREDENTIALS[0]["email"]
+    if "demo_user_password" not in st.session_state:
+        st.session_state["demo_user_password"] = ""
     if "settings_loaded" not in st.session_state:
         apply_preset(st.session_state["preset_name"])
         st.session_state["settings_loaded"] = True
@@ -629,27 +609,41 @@ def find_state_steps(telemetry: pd.DataFrame) -> Dict[str, Optional[int]]:
     return out
 
 
-def make_screenshot_plan(cfg: SimConfig, state_steps: Dict[str, Optional[int]]) -> pd.DataFrame:
-    rows: List[Dict[str, object]] = []
-    hints = {
-        "NOMINAL": "Use nominal preset or no fault + low random fault rate.",
-        "THROTTLE": "Inject minor fault or mild threshold breach.",
-        "SAFE": "Inject critical fault or hard threshold breach.",
-        "RECOVER": "Place critical fault earlier and inspect post-clear period.",
-    }
-    for state in ["NOMINAL", "THROTTLE", "SAFE", "RECOVER"]:
-        rows.append(
-            {
-                "target_state": state,
-                "recommended_step": state_steps[state] if state_steps[state] is not None else "not reached",
-                "policy_mode": cfg.policy_mode,
-                "hysteresis": cfg.use_hysteresis,
-                "manual_fault": cfg.manual_fault,
-                "manual_fault_step": cfg.manual_fault_step,
-                "random_fault_rate": cfg.random_fault_rate,
-                "hint": hints[state],
-            }
-        )
+def check_demo_login(email: str, password: str) -> bool:
+    for cred in DEMO_CREDENTIALS:
+        if email.strip().lower() == cred["email"].lower() and password == cred["password"]:
+            return True
+    return False
+
+
+def onboarding_steps_df() -> pd.DataFrame:
+    rows = [
+        {
+            "step": 1,
+            "action": "Sign in with demo credentials",
+            "outcome": "Unlocks guided onboarding for evaluation users.",
+        },
+        {
+            "step": 2,
+            "action": "Choose scenario preset",
+            "outcome": "Loads stable baseline settings for reproducible runs.",
+        },
+        {
+            "step": 3,
+            "action": "Run simulator and inspect state transitions",
+            "outcome": "Explains why state changes happen and when safety escalates.",
+        },
+        {
+            "step": 4,
+            "action": "Use experiment lab",
+            "outcome": "Compares policy modes and hysteresis impact across many seeds.",
+        },
+        {
+            "step": 5,
+            "action": "Export CSV artifacts",
+            "outcome": "Generates evidence for customer review and pilot discussions.",
+        },
+    ]
     return pd.DataFrame(rows)
 
 
@@ -784,68 +778,18 @@ def state_badge(state: str) -> str:
     """
 
 
-def build_tour_assets(
-    cfg: SimConfig,
-    state_steps: Dict[str, Optional[int]],
-) -> Tuple[str, str]:
-    md = [
-        "# MOCP Guided Demo Tour",
-        "",
-        "## Live URL",
-        "- https://mocp--mvp.streamlit.app",
-        "",
-        "## Scenario Configuration",
-        f"- policy_mode: `{cfg.policy_mode}`",
-        f"- steps: `{cfg.steps}`",
-        f"- seed: `{cfg.seed}`",
-        f"- noise_level: `{cfg.noise_level}`",
-        f"- random_fault_rate: `{cfg.random_fault_rate}`",
-        f"- manual_fault: `{cfg.manual_fault}` at step `{cfg.manual_fault_step}`",
-        f"- hysteresis: `{cfg.use_hysteresis}` (min_dwell={cfg.min_dwell_steps}, recover_hold={cfg.recover_hold_steps})",
-        "",
-        "## Camera/Screen Capture Script",
-        "1. Show dashboard overview and controls (10s).",
-        f"2. Jump to NOMINAL step `{state_steps.get('NOMINAL', 'n/a')}` and explain steady state (15s).",
-        f"3. Jump to THROTTLE step `{state_steps.get('THROTTLE', 'n/a')}` and explain trigger reason (20s).",
-        f"4. Jump to SAFE step `{state_steps.get('SAFE', 'n/a')}` and explain protective behavior (20s).",
-        f"5. Jump to RECOVER step `{state_steps.get('RECOVER', 'n/a')}` and explain return path (20s).",
-        "6. Scroll event timeline and transition log (20s).",
-        "7. Show experiment lab summary + CSV export (20s).",
-    ]
-
-    tour_obj = {
-        "url": "https://mocp--mvp.streamlit.app",
-        "config": {
-            "policy_mode": cfg.policy_mode,
-            "steps": cfg.steps,
-            "seed": cfg.seed,
-            "noise_level": cfg.noise_level,
-            "random_fault_rate": cfg.random_fault_rate,
-            "manual_fault": cfg.manual_fault,
-            "manual_fault_step": cfg.manual_fault_step,
-            "use_hysteresis": cfg.use_hysteresis,
-            "min_dwell_steps": cfg.min_dwell_steps,
-            "recover_hold_steps": cfg.recover_hold_steps,
-        },
-        "state_steps": state_steps,
-        "scenes": [
-            "dashboard_overview",
-            "nominal_state",
-            "throttle_state",
-            "safe_state",
-            "recover_state",
-            "timeline_and_transition_log",
-            "experiment_lab_and_exports",
-        ],
-    }
-    return "\n".join(md), json.dumps(tour_obj, indent=2)
+def get_credential_reference_text() -> str:
+    lines = ["Demo credentials for onboarding:"]
+    for cred in DEMO_CREDENTIALS:
+        lines.append(f"- {cred['role']}: {cred['email']} / {cred['password']}")
+    return "\n".join(lines)
 
 
 def main() -> None:
     ensure_state_defaults()
 
     st.title("Managed Onboard Compute Payload (MOCP) - Prototype MVP")
-    st.caption(f"MVP assumption under test: {MVP_ASSUMPTION_TEXT}")
+    st.caption(APP_VALUE_PROP)
 
     with st.sidebar:
         st.header("Scenario Presets")
@@ -919,18 +863,50 @@ def main() -> None:
     if st.session_state["focus_step"] > cfg.steps - 1:
         st.session_state["focus_step"] = cfg.steps - 1
 
-    tab_sim, tab_exp, tab_submit = st.tabs(
+    tab_onboard, tab_sim, tab_exp = st.tabs(
         [
+            "Client Onboarding",
             "Live Simulator",
             "Experiment Lab",
-            "Submission Pack",
         ]
     )
+
+    with tab_onboard:
+        st.subheader("Welcome")
+        st.write(
+            "This environment helps mission teams evaluate constrained compute operations, "
+            "safety transitions, and policy stability before pilot integration."
+        )
+
+        c_left, c_right = st.columns([1, 1])
+        with c_left:
+            st.markdown("**Evaluation Demo Access**")
+            st.code(get_credential_reference_text(), language="text")
+            with st.form("demo_login_form"):
+                email = st.text_input("Email", key="demo_user_email")
+                password = st.text_input("Password", type="password", key="demo_user_password")
+                submit = st.form_submit_button("Sign In")
+            if submit:
+                st.session_state["demo_authenticated"] = check_demo_login(email, password)
+            if st.session_state["demo_authenticated"]:
+                st.success("Signed in. You can now run scenarios and experiments.")
+            else:
+                st.info("Use one of the demo credentials above to sign in.")
+
+        with c_right:
+            st.markdown("**Onboarding Workflow**")
+            st.dataframe(onboarding_steps_df(), use_container_width=True, height=250)
+
+        st.markdown("**Quick Start**")
+        st.write("1. Apply `Balanced Demo` in the sidebar.")
+        st.write("2. Go to `Live Simulator` and inspect state transitions.")
+        st.write("3. Go to `Experiment Lab` and run Monte Carlo comparisons.")
+        st.write("4. Export CSV artifacts for review.")
 
     with tab_sim:
         jump_cols = st.columns([2, 1])
         with jump_cols[0]:
-            st.write("Quick Jump (recommended screenshot targets)")
+            st.write("Quick Jump (state focus targets)")
             st.selectbox(
                 "State target",
                 options=["NOMINAL", "THROTTLE", "SAFE", "RECOVER"],
@@ -946,7 +922,7 @@ def main() -> None:
                     st.warning("This state was not reached in the current run.")
 
         st.slider(
-            "Focus step (for inspection/screenshots)",
+            "Focus step (for inspection)",
             min_value=0,
             max_value=cfg.steps - 1,
             step=1,
@@ -1071,53 +1047,8 @@ def main() -> None:
         else:
             st.info("Click 'Run Monte Carlo' to generate experiment metrics.")
 
-    with tab_submit:
-        st.subheader("Screenshot Plan")
-        plan_df = make_screenshot_plan(cfg, state_steps)
-        st.dataframe(plan_df, use_container_width=True, height=210)
-        st.download_button(
-            "Download screenshot checklist CSV",
-            data=plan_df.to_csv(index=False).encode("utf-8"),
-            file_name="mocp_screenshot_plan.csv",
-            mime="text/csv",
-        )
-
-        st.subheader("Service Blueprint / Pilot Workflow")
-        blueprint_df = pd.DataFrame(SERVICE_BLUEPRINT_ROWS)
-        st.dataframe(blueprint_df, use_container_width=True, height=230)
-        st.download_button(
-            "Download service blueprint CSV",
-            data=blueprint_df.to_csv(index=False).encode("utf-8"),
-            file_name="mocp_service_blueprint.csv",
-            mime="text/csv",
-        )
-
-        st.subheader("Guided Demo + Video Tour Assets")
-        tour_md, tour_json = build_tour_assets(cfg, state_steps)
-        st.code(tour_md, language="markdown")
-        c1, c2 = st.columns(2)
-        c1.download_button(
-            "Download tour script (.md)",
-            data=tour_md.encode("utf-8"),
-            file_name="mocp_demo_tour.md",
-            mime="text/markdown",
-        )
-        c2.download_button(
-            "Download tour scenes (.json)",
-            data=tour_json.encode("utf-8"),
-            file_name="mocp_demo_tour.json",
-            mime="application/json",
-        )
-
-        st.subheader("Report-Ready MVP Description (2-4 sentences)")
-        st.markdown(
-            "We built an interactive Streamlit prototype of a Managed Onboard Compute Payload (MOCP) safety workflow for teams exploring onboard autonomy operations. "
-            "The prototype simulates power and temperature telemetry, supports manual/random fault injection, and visualizes transitions across NOMINAL, THROTTLE, SAFE, and RECOVER. "
-            "It adds reason-level explainability, hysteresis controls, and experiment tooling so users can evaluate stability, trust, and incident triage behavior. "
-            "The core assumption under test is that explicit transition transparency improves operator confidence and operational decision speed."
-        )
-
-        with st.expander("README / Usage Notes", expanded=False):
+        st.subheader("Client Documentation")
+        with st.expander("Platform Notes", expanded=False):
             st.markdown(README_TEXT)
 
 

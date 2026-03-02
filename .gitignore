@@ -7,3 +7,4 @@ evaluation_*.csv
 mocp_experiment_*.csv
 mocp_sim_export.csv
 mocp_screenshot_plan.csv
+submission_assets/

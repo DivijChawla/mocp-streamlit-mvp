@@ -1,62 +1,49 @@
-# Managed Onboard Compute Payload (MOCP) Prototype MVP
+# MOCP Client Preview
 
 Live app: https://mocp--mvp.streamlit.app
 
-## Overview
-This MVP is an interactive simulation workflow for evaluating safety-state behavior under constrained onboard conditions.
+## What this app is for
+This is a client-facing preview environment for evaluating operational safety-state behavior under constrained conditions.
 
-States:
+Core states:
 - `NOMINAL`
 - `THROTTLE`
 - `SAFE`
 - `RECOVER`
 
-## Features
-- Synthetic telemetry generator for `power_watts` and `temp_c` (periodic behavior + noise).
-- Eclipse cycle model that impacts power and temperature.
+## Key capabilities
+- Synthetic telemetry for `power_watts` and `temp_c` with periodic behavior and configurable noise.
+- Eclipse cycle model that changes power and thermal behavior.
 - Fault injection:
-  - Manual fault: `none`, `minor`, `critical`
-  - Random fault rate: `0-5 faults/hour`
-  - Fault labels: `sensor_dropout`, `watchdog_timeout`, `bitflip`
-- Policy modes:
-  - `rule_based` threshold logic
-  - `risk_scored` weighted-factor logic
+  - manual: `none`, `minor`, `critical`
+  - random rate: `0-5 faults/hour`
+- Dual policy modes:
+  - `rule_based`: threshold-driven transitions
+  - `risk_scored`: weighted-risk transitions
 - Optional hysteresis/min dwell controls.
-- Explainability panel: “Why am I in this state?”.
-- Timeline/event logs with severity tags.
-- Export telemetry + events CSV.
-- Monte Carlo Experiment Lab:
-  - Runs seeded comparisons across policy mode + hysteresis settings
-  - Outputs aggregate metrics and downloadable CSV
-- Submission Pack:
-  - Screenshot target planner (NOMINAL/THROTTLE/SAFE/RECOVER)
-  - Service blueprint table + CSV
-  - Downloadable guided demo script and tour JSON
+- Explainability panel for active transition rules.
+- Event timeline and transition logs.
+- Monte Carlo experiment lab with CSV exports.
 
-## Run Locally
+## Demo credentials
+Use these demo accounts in the in-app onboarding tab:
+- Operator: `demo.operator@ods.local` / `ODS-demo-2026!`
+- Mission Analyst: `mission.analyst@ods.local` / `ODS-analyst-2026!`
+
+## Run locally
 ```bash
 pip install streamlit pandas numpy
 streamlit run app.py
 ```
 
-## Suggested Screenshot Workflow
-Use preset scenarios and “Jump To Target Step” for consistent captures:
-1. `Nominal Screenshot`
-2. `Throttle Screenshot`
-3. `Safe Screenshot`
-4. `Recover Screenshot`
+## Onboarding flow
+1. Open the `Client Onboarding` tab.
+2. Sign in with one of the demo credentials below.
+3. Apply a scenario preset from the sidebar.
+4. Review transitions in `Live Simulator`.
+5. Run policy comparisons in `Experiment Lab`.
 
-Then export screenshot checklist CSV from the Submission Pack tab.
-
-## Quantitative Evidence Workflow
-1. Open **Experiment Lab**.
-2. Choose seed count (e.g., 60+), steps, noise, and fault rate.
-3. Run Monte Carlo.
-4. Export `mocp_experiment_summary.csv` and `mocp_experiment_raw.csv`.
-
-## Reproducible Offline Evaluation
-Run the same seeded suite used for the report:
-
+## Reproducible evaluation suite
 ```bash
 python evaluate_mvp.py --seeds 120 --out-dir .
 ```
@@ -65,6 +52,32 @@ Outputs:
 - `evaluation_v2_raw.csv`
 - `evaluation_v2_summary.csv`
 
-## Service Blueprint Artifact
-FigJam board:
-- https://www.figma.com/online-whiteboard/create-diagram/4a0efe97-3f2a-423a-aabc-c35b15a8fe43
+## Screenshot set (for reports)
+Manual capture targets:
+- `Client Onboarding` signed-in view.
+- `Nominal Operations` preset + `NOMINAL` jump target.
+- `Throttle Response` preset + `THROTTLE` jump target.
+- `Safe Mode Trigger` preset + `SAFE` jump target.
+- `Recovery Sequence` preset + `RECOVER` jump target.
+
+Automated capture:
+```bash
+# run app (example local port)
+streamlit run app.py --server.port 8502
+
+# in another terminal (requires playwright)
+python capture_screenshots.py
+```
+
+Expected output files:
+- `submission_assets/screenshots/00_onboarding.png`
+- `submission_assets/screenshots/01_nominal.png`
+- `submission_assets/screenshots/02_throttle.png`
+- `submission_assets/screenshots/03_safe.png`
+- `submission_assets/screenshots/04_recover.png`
+
+## Additional artifacts
+- Client workflow blueprint (FigJam):
+  - https://www.figma.com/online-whiteboard/create-diagram/4a0efe97-3f2a-423a-aabc-c35b15a8fe43
+- Validation and evidence map (FigJam):
+  - https://www.figma.com/online-whiteboard/create-diagram/a88ac6a3-6241-4f36-81c9-cb5c94ce2a1f
