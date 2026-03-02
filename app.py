@@ -24,6 +24,45 @@ STATE_COLORS = {
     "RECOVER": "#005f8f",
 }
 
+MVP_ASSUMPTION_TEXT = (
+    "Teams evaluating onboard autonomy will find a transparent safety state machine useful "
+    "for understanding and trusting fault handling behavior."
+)
+
+SERVICE_BLUEPRINT_ROWS = [
+    {
+        "phase": "1) Configure Mission Constraints",
+        "user_action": "Operator sets thresholds, eclipse profile, seed, and fault settings.",
+        "system_action": "Simulator generates synthetic telemetry and initializes safety logic.",
+        "mvp_evidence": "Configurable controls and deterministic replay.",
+    },
+    {
+        "phase": "2) Run Scenario",
+        "user_action": "Operator runs scenario and injects none/minor/critical faults.",
+        "system_action": "State machine evaluates rules and transitions in real time.",
+        "mvp_evidence": "Live state badge + telemetry chart + transition log.",
+    },
+    {
+        "phase": "3) Investigate Incident",
+        "user_action": "Operator inspects event timeline and asks why the state changed.",
+        "system_action": "UI surfaces active rules and reason text for each transition.",
+        "mvp_evidence": "\"Why am I in this state?\" panel + event table.",
+    },
+    {
+        "phase": "4) Post-Run Review",
+        "user_action": "Operator exports run data for debrief/share-out.",
+        "system_action": "App exports combined telemetry + event CSV.",
+        "mvp_evidence": "Download button and structured CSV output.",
+    },
+]
+
+DEMO_SCRIPT_STEPS = [
+    "Set random fault rate to 0.0 and manual fault to none. Capture NOMINAL screenshot.",
+    "Set manual fault to minor at focus step. Capture THROTTLE screenshot.",
+    "Set manual fault to critical at focus step. Capture SAFE screenshot.",
+    "Keep critical fault earlier in the run and move focus to post-SAFE segment. Capture RECOVER screenshot.",
+]
+
 README_TEXT = """
 # Managed Onboard Compute Payload (MOCP) Prototype MVP
 
@@ -414,6 +453,7 @@ def state_badge(state: str) -> str:
 
 def main() -> None:
     st.title("Managed Onboard Compute Payload (MOCP) - Prototype MVP")
+    st.caption(f"MVP assumption under test: {MVP_ASSUMPTION_TEXT}")
 
     with st.sidebar:
         st.header("Simulation Controls")
@@ -517,6 +557,32 @@ def main() -> None:
         file_name="mocp_sim_export.csv",
         mime="text/csv",
     )
+
+    st.subheader("Service Blueprint / Pilot Workflow")
+    blueprint_df = pd.DataFrame(SERVICE_BLUEPRINT_ROWS)
+    st.dataframe(blueprint_df, use_container_width=True, height=220)
+    st.download_button(
+        "Download service blueprint CSV",
+        data=blueprint_df.to_csv(index=False).encode("utf-8"),
+        file_name="mocp_service_blueprint.csv",
+        mime="text/csv",
+    )
+
+    st.subheader("5-Minute Demo Script")
+    for idx, step in enumerate(DEMO_SCRIPT_STEPS, start=1):
+        st.write(f"{idx}. {step}")
+
+    with st.expander("Report-Ready MVP Description (2-4 sentences)", expanded=False):
+        st.markdown(
+            "We built an interactive Streamlit prototype of a Managed Onboard Compute Payload (MOCP) "
+            "safety workflow for teams exploring onboard autonomy operations. "
+            "The prototype simulates power and temperature telemetry, supports manual/random fault injection, "
+            "and visualizes state transitions across NOMINAL, THROTTLE, SAFE, and RECOVER. "
+            "It is intended for CubeSat teams and space-software builders who need to reason about fault "
+            "handling behavior before investing in full flight implementations. "
+            "The core assumption under test is that transparent transition logic increases operator trust "
+            "and speeds incident triage."
+        )
 
     with st.expander("README / Usage Notes", expanded=False):
         st.markdown(README_TEXT)
