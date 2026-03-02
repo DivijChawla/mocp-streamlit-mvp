@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+import json
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -7,6 +8,7 @@ import streamlit as st
 
 st.set_page_config(page_title="MOCP Prototype MVP", layout="wide")
 
+# Thresholds for the baseline rule-based policy.
 SAFE_TEMP_RANGE = (-5.0, 45.0)
 NOMINAL_TEMP_RANGE = (5.0, 35.0)
 THROTTLE_PWR = 90.0
@@ -25,52 +27,58 @@ STATE_COLORS = {
 }
 
 MVP_ASSUMPTION_TEXT = (
-    "Teams evaluating onboard autonomy will find a transparent safety state machine useful "
-    "for understanding and trusting fault handling behavior."
+    "Teams evaluating onboard autonomy will find transparent state transitions and "
+    "reason traces useful for trust and incident triage."
 )
 
 SERVICE_BLUEPRINT_ROWS = [
     {
         "phase": "1) Configure Mission Constraints",
-        "user_action": "Operator sets thresholds, eclipse profile, seed, and fault settings.",
-        "system_action": "Simulator generates synthetic telemetry and initializes safety logic.",
-        "mvp_evidence": "Configurable controls and deterministic replay.",
+        "user_action": "Set scenario preset, thresholds, noise, eclipse, and fault controls.",
+        "system_action": "Generates synthetic telemetry and initializes state-machine policy.",
+        "mvp_evidence": "Preset + controls panel with deterministic seed replay.",
     },
     {
         "phase": "2) Run Scenario",
-        "user_action": "Operator runs scenario and injects none/minor/critical faults.",
-        "system_action": "State machine evaluates rules and transitions in real time.",
-        "mvp_evidence": "Live state badge + telemetry chart + transition log.",
+        "user_action": "Execute nominal/minor/critical scenarios.",
+        "system_action": "Evaluates state transitions and logs reason strings each step.",
+        "mvp_evidence": "Current-state card, telemetry chart, transition table.",
     },
     {
-        "phase": "3) Investigate Incident",
-        "user_action": "Operator inspects event timeline and asks why the state changed.",
-        "system_action": "UI surfaces active rules and reason text for each transition.",
-        "mvp_evidence": "\"Why am I in this state?\" panel + event table.",
+        "phase": "3) Investigate Incidents",
+        "user_action": "Inspect event timeline and the explanation panel.",
+        "system_action": "Surfaces active rules/risk factors for the focus step.",
+        "mvp_evidence": "Why-panel + severity-tagged timeline + event log.",
     },
     {
-        "phase": "4) Post-Run Review",
-        "user_action": "Operator exports run data for debrief/share-out.",
-        "system_action": "App exports combined telemetry + event CSV.",
-        "mvp_evidence": "Download button and structured CSV output.",
+        "phase": "4) Evaluate Robustness",
+        "user_action": "Run Monte Carlo experiment lab across policies and hysteresis settings.",
+        "system_action": "Computes aggregate metrics across many seeds.",
+        "mvp_evidence": "Summary table + CSV downloads.",
     },
-]
-
-DEMO_SCRIPT_STEPS = [
-    "Set random fault rate to 0.0 and manual fault to none. Capture NOMINAL screenshot.",
-    "Set manual fault to minor at focus step. Capture THROTTLE screenshot.",
-    "Set manual fault to critical at focus step. Capture SAFE screenshot.",
-    "Keep critical fault earlier in the run and move focus to post-SAFE segment. Capture RECOVER screenshot.",
+    {
+        "phase": "5) Package Evidence",
+        "user_action": "Capture screenshots and export artifacts.",
+        "system_action": "Provides screenshot target steps and report/tour assets.",
+        "mvp_evidence": "Screenshot plan table + downloadable tour script/checklists.",
+    },
 ]
 
 README_TEXT = """
 # Managed Onboard Compute Payload (MOCP) Prototype MVP
 
-## What Is Simulated
-- Simple synthetic telemetry: `power_watts` and `temp_c` with periodic behavior + noise.
-- Eclipse effect that lowers power and cools temperature.
-- Fault labels with configurable random rate and manual injection.
-- A deterministic safety state machine: `NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`.
+## What This MVP Includes
+- Telemetry simulation (`power_watts`, `temp_c`) with periodic signal + noise.
+- Eclipse cycle that changes power and temperature behavior.
+- Fault injection controls (`none`, `minor`, `critical`) + random rate (0-5 faults/hour).
+- Two policy modes:
+  - `rule_based`: explicit threshold rules
+  - `risk_scored`: weighted risk factors converted to states
+- State machine visualization (`NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`) with reason traces.
+- Optional hysteresis/min dwell controls to reduce state flapping.
+- Event timeline, transition log, and telemetry+events CSV export.
+- Monte Carlo experiment lab with aggregate metrics and downloadable CSV.
+- Screenshot planning and downloadable guided demo/tour scripts.
 
 ## Run Locally (macOS)
 ```bash
@@ -78,27 +86,120 @@ pip install streamlit pandas numpy
 streamlit run app.py
 ```
 
-## Reproducing 4 Screenshots For a Report
-1. **NOMINAL**
-   - Set `Manual fault` = `none`.
-   - Set `Random fault rate` = `0.0 faults/hour`.
-   - Keep eclipse enabled and moderate noise.
-   - Pick a focus step where power and temperature are within nominal bounds.
-
-2. **THROTTLE**
-   - Set `Manual fault` = `minor` near the focus step.
-   - Or increase `Random fault rate` so a minor fault appears.
-   - Capture when state indicator shows `THROTTLE`.
-
-3. **SAFE**
-   - Set `Manual fault` = `critical` at the focus step.
-   - Capture when state indicator shows `SAFE`.
-
-4. **RECOVER**
-   - Keep `Manual fault` = `critical` at an earlier step.
-   - Enable hysteresis and set `Recover hold steps` > 1.
-   - Move focus to just after SAFE clears; capture when indicator shows `RECOVER`.
+## Recommended Submission Artifacts
+1. Live app walkthrough (using preset scenarios).
+2. Four screenshots: NOMINAL / THROTTLE / SAFE / RECOVER.
+3. Service blueprint (table in app + external FigJam).
+4. Monte Carlo summary table + exported metrics CSV.
 """
+
+PRESETS: Dict[str, Dict[str, object]] = {
+    "Balanced Demo": {
+        "steps": 240,
+        "seed": 42,
+        "noise_level": 3.0,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 0.5,
+        "manual_fault": "none",
+        "manual_fault_step": 120,
+        "use_hysteresis": True,
+        "min_dwell_steps": 4,
+        "recover_hold_steps": 5,
+        "policy_mode": "rule_based",
+    },
+    "Nominal Screenshot": {
+        "steps": 240,
+        "seed": 7,
+        "noise_level": 2.0,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 0.0,
+        "manual_fault": "none",
+        "manual_fault_step": 120,
+        "use_hysteresis": True,
+        "min_dwell_steps": 4,
+        "recover_hold_steps": 5,
+        "policy_mode": "rule_based",
+    },
+    "Throttle Screenshot": {
+        "steps": 240,
+        "seed": 9,
+        "noise_level": 3.0,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 0.2,
+        "manual_fault": "minor",
+        "manual_fault_step": 120,
+        "use_hysteresis": True,
+        "min_dwell_steps": 4,
+        "recover_hold_steps": 5,
+        "policy_mode": "rule_based",
+    },
+    "Safe Screenshot": {
+        "steps": 240,
+        "seed": 11,
+        "noise_level": 3.0,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 0.0,
+        "manual_fault": "critical",
+        "manual_fault_step": 120,
+        "use_hysteresis": True,
+        "min_dwell_steps": 4,
+        "recover_hold_steps": 5,
+        "policy_mode": "rule_based",
+    },
+    "Recover Screenshot": {
+        "steps": 240,
+        "seed": 12,
+        "noise_level": 3.0,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 0.0,
+        "manual_fault": "critical",
+        "manual_fault_step": 80,
+        "use_hysteresis": True,
+        "min_dwell_steps": 5,
+        "recover_hold_steps": 8,
+        "policy_mode": "rule_based",
+    },
+    "Stress Fault Storm": {
+        "steps": 240,
+        "seed": 21,
+        "noise_level": 4.0,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 3.0,
+        "manual_fault": "none",
+        "manual_fault_step": 120,
+        "use_hysteresis": True,
+        "min_dwell_steps": 4,
+        "recover_hold_steps": 5,
+        "policy_mode": "rule_based",
+    },
+    "Risk Policy Demo": {
+        "steps": 240,
+        "seed": 31,
+        "noise_level": 3.5,
+        "enable_eclipse": True,
+        "eclipse_period": 90,
+        "eclipse_duration": 35,
+        "random_fault_rate": 1.2,
+        "manual_fault": "minor",
+        "manual_fault_step": 120,
+        "use_hysteresis": True,
+        "min_dwell_steps": 4,
+        "recover_hold_steps": 6,
+        "policy_mode": "risk_scored",
+    },
+}
 
 
 @dataclass
@@ -115,16 +216,44 @@ class SimConfig:
     use_hysteresis: bool
     min_dwell_steps: int
     recover_hold_steps: int
+    policy_mode: str
+
+
+def ensure_state_defaults() -> None:
+    if "preset_name" not in st.session_state:
+        st.session_state["preset_name"] = "Balanced Demo"
+    if "focus_step" not in st.session_state:
+        st.session_state["focus_step"] = 239
+    if "tour_state_select" not in st.session_state:
+        st.session_state["tour_state_select"] = "NOMINAL"
+    if "settings_loaded" not in st.session_state:
+        apply_preset(st.session_state["preset_name"])
+        st.session_state["settings_loaded"] = True
+
+
+def apply_preset(preset_name: str) -> None:
+    preset = PRESETS[preset_name]
+    st.session_state["sim_steps"] = int(preset["steps"])
+    st.session_state["sim_seed"] = int(preset["seed"])
+    st.session_state["sim_noise"] = float(preset["noise_level"])
+    st.session_state["sim_enable_eclipse"] = bool(preset["enable_eclipse"])
+    st.session_state["sim_eclipse_period"] = int(preset["eclipse_period"])
+    st.session_state["sim_eclipse_duration"] = int(preset["eclipse_duration"])
+    st.session_state["sim_manual_fault"] = str(preset["manual_fault"])
+    st.session_state["sim_manual_fault_step"] = int(preset["manual_fault_step"])
+    st.session_state["sim_random_fault_rate"] = float(preset["random_fault_rate"])
+    st.session_state["sim_use_hysteresis"] = bool(preset["use_hysteresis"])
+    st.session_state["sim_min_dwell"] = int(preset["min_dwell_steps"])
+    st.session_state["sim_recover_hold"] = int(preset["recover_hold_steps"])
+    st.session_state["sim_policy_mode"] = str(preset["policy_mode"])
+    st.session_state["focus_step"] = min(st.session_state["sim_steps"] - 1, int(preset["manual_fault_step"]))
 
 
 def simulate_telemetry(cfg: SimConfig) -> pd.DataFrame:
     rng = np.random.default_rng(cfg.seed)
     steps = np.arange(cfg.steps)
 
-    timestamps = (
-        pd.Timestamp("2026-01-01 00:00:00")
-        + pd.to_timedelta(steps, unit="m")
-    )
+    timestamps = pd.Timestamp("2026-01-01 00:00:00") + pd.to_timedelta(steps, unit="m")
 
     eclipse = np.zeros(cfg.steps, dtype=bool)
     if cfg.enable_eclipse:
@@ -137,13 +266,8 @@ def simulate_telemetry(cfg: SimConfig) -> pd.DataFrame:
     noise_power = rng.normal(0.0, cfg.noise_level, size=cfg.steps)
     noise_temp = rng.normal(0.0, cfg.noise_level * 0.25, size=cfg.steps)
 
-    power = power_wave + noise_power
-    temp = temp_wave + noise_temp
-
-    power[eclipse] -= 42.0
-    temp[eclipse] -= 7.5
-
-    power = np.clip(power, 0.0, None)
+    power = np.clip(power_wave + noise_power - 42.0 * eclipse.astype(float), 0.0, None)
+    temp = temp_wave + noise_temp - 7.5 * eclipse.astype(float)
 
     return pd.DataFrame(
         {
@@ -168,13 +292,12 @@ def generate_faults(cfg: SimConfig, telemetry: pd.DataFrame) -> pd.DataFrame:
         step = int(row["step"])
         if rng.random() < p_fault:
             severity = "critical" if rng.random() < 0.25 else "minor"
-            label = rng.choice(FAULT_LABELS[severity])
             fault_rows.append(
                 {
                     "step": step,
                     "timestamp": row["timestamp"],
                     "severity": severity,
-                    "fault_label": label,
+                    "fault_label": rng.choice(FAULT_LABELS[severity]),
                     "source": "random",
                 }
             )
@@ -182,21 +305,18 @@ def generate_faults(cfg: SimConfig, telemetry: pd.DataFrame) -> pd.DataFrame:
     if cfg.manual_fault != "none":
         step = int(np.clip(cfg.manual_fault_step, 0, cfg.steps - 1))
         step_time = telemetry.loc[telemetry["step"] == step, "timestamp"].iloc[0]
-        label = rng.choice(FAULT_LABELS[cfg.manual_fault])
         fault_rows.append(
             {
                 "step": step,
                 "timestamp": step_time,
                 "severity": cfg.manual_fault,
-                "fault_label": label,
+                "fault_label": rng.choice(FAULT_LABELS[cfg.manual_fault]),
                 "source": "manual",
             }
         )
 
     if not fault_rows:
-        return pd.DataFrame(
-            columns=["step", "timestamp", "severity", "fault_label", "source"]
-        )
+        return pd.DataFrame(columns=["step", "timestamp", "severity", "fault_label", "source"])
 
     return (
         pd.DataFrame(fault_rows)
@@ -205,7 +325,7 @@ def generate_faults(cfg: SimConfig, telemetry: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def evaluate_desired_state(
+def evaluate_desired_state_rule(
     power_watts: float,
     temp_c: float,
     step_faults: pd.DataFrame,
@@ -229,7 +349,6 @@ def evaluate_desired_state(
         reasons.append(
             f"temp {temp_c:.1f}C outside SAFE range [{SAFE_TEMP_RANGE[0]:.1f}, {SAFE_TEMP_RANGE[1]:.1f}]"
         )
-
     if has_critical or safe_power_hit or safe_temp_hit:
         return "SAFE", reasons
 
@@ -239,15 +358,70 @@ def evaluate_desired_state(
         reasons.append(f"power {power_watts:.1f}W < THROTTLE_PWR {THROTTLE_PWR:.1f}W")
     if throttle_temp_hit:
         reasons.append(
-            "temp "
-            f"{temp_c:.1f}C outside NOMINAL range "
-            f"[{NOMINAL_TEMP_RANGE[0]:.1f}, {NOMINAL_TEMP_RANGE[1]:.1f}]"
+            f"temp {temp_c:.1f}C outside NOMINAL range [{NOMINAL_TEMP_RANGE[0]:.1f}, {NOMINAL_TEMP_RANGE[1]:.1f}]"
         )
-
     if has_minor or throttle_power_hit or throttle_temp_hit:
         return "THROTTLE", reasons
 
     return "NOMINAL", ["all checks within nominal bounds"]
+
+
+def evaluate_desired_state_risk(
+    power_watts: float,
+    temp_c: float,
+    step_faults: pd.DataFrame,
+) -> Tuple[str, List[str]]:
+    reasons: List[str] = []
+    score = 0.0
+
+    has_critical = not step_faults[step_faults["severity"] == "critical"].empty
+    has_minor = not step_faults[step_faults["severity"] == "minor"].empty
+
+    safe_temp_hit = temp_c < SAFE_TEMP_RANGE[0] or temp_c > SAFE_TEMP_RANGE[1]
+    throttle_temp_hit = temp_c < NOMINAL_TEMP_RANGE[0] or temp_c > NOMINAL_TEMP_RANGE[1]
+
+    safe_power_hit = power_watts < SAFE_PWR
+    throttle_power_hit = power_watts < THROTTLE_PWR
+
+    if has_critical:
+        score += 4.0
+        reasons.append("critical fault +4.0")
+    if has_minor:
+        score += 1.5
+        reasons.append("minor fault +1.5")
+
+    if safe_power_hit:
+        score += 3.0
+        reasons.append("SAFE power breach +3.0")
+    elif throttle_power_hit:
+        score += 1.5
+        reasons.append("THROTTLE power breach +1.5")
+
+    if safe_temp_hit:
+        score += 3.0
+        reasons.append("SAFE temp breach +3.0")
+    elif throttle_temp_hit:
+        score += 1.5
+        reasons.append("THROTTLE temp breach +1.5")
+
+    reasons.append(f"risk_score={score:.1f}")
+
+    if score >= 4.0:
+        return "SAFE", reasons
+    if score >= 1.5:
+        return "THROTTLE", reasons
+    return "NOMINAL", reasons
+
+
+def evaluate_desired_state(
+    power_watts: float,
+    temp_c: float,
+    step_faults: pd.DataFrame,
+    policy_mode: str,
+) -> Tuple[str, List[str]]:
+    if policy_mode == "risk_scored":
+        return evaluate_desired_state_risk(power_watts, temp_c, step_faults)
+    return evaluate_desired_state_rule(power_watts, temp_c, step_faults)
 
 
 def run_state_machine(
@@ -289,7 +463,9 @@ def run_state_machine(
             power_watts=float(row["power_watts"]),
             temp_c=float(row["temp_c"]),
             step_faults=step_faults,
+            policy_mode=cfg.policy_mode,
         )
+        reasons = [f"policy={cfg.policy_mode}"] + reasons
 
         candidate_state = desired_state
 
@@ -301,9 +477,7 @@ def run_state_machine(
         elif current_state == "RECOVER":
             if recover_progress < cfg.recover_hold_steps:
                 candidate_state = "RECOVER"
-                reasons.append(
-                    f"RECOVER hold {recover_progress}/{cfg.recover_hold_steps}"
-                )
+                reasons.append(f"RECOVER hold {recover_progress}/{cfg.recover_hold_steps}")
             else:
                 candidate_state = desired_state
 
@@ -313,9 +487,7 @@ def run_state_machine(
             and candidate_state != "SAFE"
             and dwell_steps < cfg.min_dwell_steps
         ):
-            reasons.append(
-                f"hysteresis hold: dwell {dwell_steps}/{cfg.min_dwell_steps}"
-            )
+            reasons.append(f"hysteresis hold: dwell {dwell_steps}/{cfg.min_dwell_steps}")
             candidate_state = current_state
 
         if candidate_state != current_state:
@@ -352,11 +524,7 @@ def run_state_machine(
 
             current_state = candidate_state
             dwell_steps = 1
-
-            if current_state == "RECOVER":
-                recover_progress = 1
-            else:
-                recover_progress = 0
+            recover_progress = 1 if current_state == "RECOVER" else 0
         else:
             dwell_steps += 1
             if current_state == "RECOVER":
@@ -371,9 +539,7 @@ def run_state_machine(
 
     transitions_df = pd.DataFrame(transitions)
     timeline_df = (
-        pd.DataFrame(timeline_events)
-        .sort_values(["step", "event_kind"])
-        .reset_index(drop=True)
+        pd.DataFrame(timeline_events).sort_values(["step", "event_kind"]).reset_index(drop=True)
         if timeline_events
         else pd.DataFrame(
             columns=[
@@ -388,14 +554,106 @@ def run_state_machine(
             ]
         )
     )
-
     return out, transitions_df, timeline_df
 
 
-def make_combined_export(
+def state_segments(states: pd.Series) -> pd.DataFrame:
+    segments: List[Dict[str, object]] = []
+    if states.empty:
+        return pd.DataFrame(columns=["state", "start_step", "end_step", "duration_steps"])
+
+    start = 0
+    cur = str(states.iloc[0])
+    for idx in range(1, len(states)):
+        nxt = str(states.iloc[idx])
+        if nxt != cur:
+            segments.append(
+                {
+                    "state": cur,
+                    "start_step": start,
+                    "end_step": idx - 1,
+                    "duration_steps": idx - start,
+                }
+            )
+            cur = nxt
+            start = idx
+    segments.append(
+        {
+            "state": cur,
+            "start_step": start,
+            "end_step": len(states) - 1,
+            "duration_steps": len(states) - start,
+        }
+    )
+    return pd.DataFrame(segments)
+
+
+def compute_run_metrics(
     telemetry: pd.DataFrame,
+    transitions: pd.DataFrame,
     timeline: pd.DataFrame,
-) -> pd.DataFrame:
+) -> Dict[str, float]:
+    total_steps = len(telemetry)
+    total_hours = max(total_steps / 60.0, 1e-9)
+    counts = telemetry["state"].value_counts().to_dict()
+    fault_count = int((timeline["event_kind"] == "fault").sum()) if not timeline.empty else 0
+
+    seg = state_segments(telemetry["state"])
+    safe_seg = seg[seg["state"] == "SAFE"]
+
+    metrics: Dict[str, float] = {
+        "steps": float(total_steps),
+        "fault_events": float(fault_count),
+        "transitions": float(len(transitions)),
+        "transitions_per_hour": float(len(transitions) / total_hours),
+        "nominal_pct": 100.0 * float(counts.get("NOMINAL", 0)) / max(total_steps, 1),
+        "throttle_pct": 100.0 * float(counts.get("THROTTLE", 0)) / max(total_steps, 1),
+        "safe_pct": 100.0 * float(counts.get("SAFE", 0)) / max(total_steps, 1),
+        "recover_pct": 100.0 * float(counts.get("RECOVER", 0)) / max(total_steps, 1),
+        "safe_segments": float(len(safe_seg)),
+        "safe_mean_duration_steps": float(safe_seg["duration_steps"].mean()) if not safe_seg.empty else 0.0,
+        "power_min": float(telemetry["power_watts"].min()),
+        "power_max": float(telemetry["power_watts"].max()),
+        "temp_min": float(telemetry["temp_c"].min()),
+        "temp_max": float(telemetry["temp_c"].max()),
+        "flapping_index": float(len(transitions) / max(fault_count + 1, 1)),
+    }
+    return metrics
+
+
+def find_state_steps(telemetry: pd.DataFrame) -> Dict[str, Optional[int]]:
+    out: Dict[str, Optional[int]] = {}
+    for state in ["NOMINAL", "THROTTLE", "SAFE", "RECOVER"]:
+        rows = telemetry[telemetry["state"] == state]
+        out[state] = int(rows.iloc[0]["step"]) if not rows.empty else None
+    return out
+
+
+def make_screenshot_plan(cfg: SimConfig, state_steps: Dict[str, Optional[int]]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    hints = {
+        "NOMINAL": "Use nominal preset or no fault + low random fault rate.",
+        "THROTTLE": "Inject minor fault or mild threshold breach.",
+        "SAFE": "Inject critical fault or hard threshold breach.",
+        "RECOVER": "Place critical fault earlier and inspect post-clear period.",
+    }
+    for state in ["NOMINAL", "THROTTLE", "SAFE", "RECOVER"]:
+        rows.append(
+            {
+                "target_state": state,
+                "recommended_step": state_steps[state] if state_steps[state] is not None else "not reached",
+                "policy_mode": cfg.policy_mode,
+                "hysteresis": cfg.use_hysteresis,
+                "manual_fault": cfg.manual_fault,
+                "manual_fault_step": cfg.manual_fault_step,
+                "random_fault_rate": cfg.random_fault_rate,
+                "hint": hints[state],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def make_combined_export(telemetry: pd.DataFrame, timeline: pd.DataFrame) -> pd.DataFrame:
     base_cols = [
         "record_type",
         "step",
@@ -433,12 +691,87 @@ def make_combined_export(
     )
     event_out["record_type"] = "event"
 
-    combined = pd.concat(
-        [telemetry_out[base_cols], event_out[base_cols]],
-        ignore_index=True,
-    ).sort_values(["step", "record_type"]).reset_index(drop=True)
+    return (
+        pd.concat([telemetry_out[base_cols], event_out[base_cols]], ignore_index=True)
+        .sort_values(["step", "record_type"])
+        .reset_index(drop=True)
+    )
 
-    return combined
+
+@st.cache_data(show_spinner=False)
+def run_experiment_grid(
+    seeds: int,
+    steps: int,
+    noise_level: float,
+    random_fault_rate: float,
+    manual_fault: str,
+    manual_fault_step: int,
+    min_dwell_steps: int,
+    recover_hold_steps: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    rows: List[Dict[str, object]] = []
+    for policy_mode in ["rule_based", "risk_scored"]:
+        for use_hysteresis in [False, True]:
+            for seed in range(1, seeds + 1):
+                cfg = SimConfig(
+                    steps=steps,
+                    seed=seed,
+                    noise_level=noise_level,
+                    enable_eclipse=True,
+                    eclipse_period=90,
+                    eclipse_duration=35,
+                    random_fault_rate=random_fault_rate,
+                    manual_fault=manual_fault,
+                    manual_fault_step=manual_fault_step,
+                    use_hysteresis=use_hysteresis,
+                    min_dwell_steps=min_dwell_steps,
+                    recover_hold_steps=recover_hold_steps,
+                    policy_mode=policy_mode,
+                )
+                telemetry = simulate_telemetry(cfg)
+                faults = generate_faults(cfg, telemetry)
+                telemetry, transitions, timeline = run_state_machine(telemetry, faults, cfg)
+                metrics = compute_run_metrics(telemetry, transitions, timeline)
+                rows.append(
+                    {
+                        "seed": seed,
+                        "policy_mode": policy_mode,
+                        "use_hysteresis": use_hysteresis,
+                        **metrics,
+                    }
+                )
+
+    raw = pd.DataFrame(rows)
+    summary = (
+        raw.groupby(["policy_mode", "use_hysteresis"])
+        .agg(
+            runs=("seed", "count"),
+            transitions_avg=("transitions", "mean"),
+            fault_events_avg=("fault_events", "mean"),
+            nominal_pct_avg=("nominal_pct", "mean"),
+            throttle_pct_avg=("throttle_pct", "mean"),
+            safe_pct_avg=("safe_pct", "mean"),
+            recover_pct_avg=("recover_pct", "mean"),
+            flapping_index_avg=("flapping_index", "mean"),
+        )
+        .reset_index()
+    )
+
+    # Relative improvement vs no hysteresis per policy.
+    summary["transition_reduction_vs_no_hyst_pct"] = np.nan
+    for policy in summary["policy_mode"].unique():
+        subset = summary[summary["policy_mode"] == policy]
+        base = subset[subset["use_hysteresis"] == False]["transitions_avg"]
+        if base.empty:
+            continue
+        base_val = float(base.iloc[0])
+        if base_val <= 0:
+            continue
+        for idx in subset.index:
+            cur = float(summary.loc[idx, "transitions_avg"])
+            summary.loc[idx, "transition_reduction_vs_no_hyst_pct"] = 100.0 * (base_val - cur) / base_val
+
+    return raw, summary
 
 
 def state_badge(state: str) -> str:
@@ -451,141 +784,341 @@ def state_badge(state: str) -> str:
     """
 
 
+def build_tour_assets(
+    cfg: SimConfig,
+    state_steps: Dict[str, Optional[int]],
+) -> Tuple[str, str]:
+    md = [
+        "# MOCP Guided Demo Tour",
+        "",
+        "## Live URL",
+        "- https://mocp--mvp.streamlit.app",
+        "",
+        "## Scenario Configuration",
+        f"- policy_mode: `{cfg.policy_mode}`",
+        f"- steps: `{cfg.steps}`",
+        f"- seed: `{cfg.seed}`",
+        f"- noise_level: `{cfg.noise_level}`",
+        f"- random_fault_rate: `{cfg.random_fault_rate}`",
+        f"- manual_fault: `{cfg.manual_fault}` at step `{cfg.manual_fault_step}`",
+        f"- hysteresis: `{cfg.use_hysteresis}` (min_dwell={cfg.min_dwell_steps}, recover_hold={cfg.recover_hold_steps})",
+        "",
+        "## Camera/Screen Capture Script",
+        "1. Show dashboard overview and controls (10s).",
+        f"2. Jump to NOMINAL step `{state_steps.get('NOMINAL', 'n/a')}` and explain steady state (15s).",
+        f"3. Jump to THROTTLE step `{state_steps.get('THROTTLE', 'n/a')}` and explain trigger reason (20s).",
+        f"4. Jump to SAFE step `{state_steps.get('SAFE', 'n/a')}` and explain protective behavior (20s).",
+        f"5. Jump to RECOVER step `{state_steps.get('RECOVER', 'n/a')}` and explain return path (20s).",
+        "6. Scroll event timeline and transition log (20s).",
+        "7. Show experiment lab summary + CSV export (20s).",
+    ]
+
+    tour_obj = {
+        "url": "https://mocp--mvp.streamlit.app",
+        "config": {
+            "policy_mode": cfg.policy_mode,
+            "steps": cfg.steps,
+            "seed": cfg.seed,
+            "noise_level": cfg.noise_level,
+            "random_fault_rate": cfg.random_fault_rate,
+            "manual_fault": cfg.manual_fault,
+            "manual_fault_step": cfg.manual_fault_step,
+            "use_hysteresis": cfg.use_hysteresis,
+            "min_dwell_steps": cfg.min_dwell_steps,
+            "recover_hold_steps": cfg.recover_hold_steps,
+        },
+        "state_steps": state_steps,
+        "scenes": [
+            "dashboard_overview",
+            "nominal_state",
+            "throttle_state",
+            "safe_state",
+            "recover_state",
+            "timeline_and_transition_log",
+            "experiment_lab_and_exports",
+        ],
+    }
+    return "\n".join(md), json.dumps(tour_obj, indent=2)
+
+
 def main() -> None:
+    ensure_state_defaults()
+
     st.title("Managed Onboard Compute Payload (MOCP) - Prototype MVP")
     st.caption(f"MVP assumption under test: {MVP_ASSUMPTION_TEXT}")
 
     with st.sidebar:
+        st.header("Scenario Presets")
+        preset_name = st.selectbox("Preset", options=list(PRESETS.keys()), key="preset_name")
+        if st.button("Apply Selected Preset"):
+            apply_preset(preset_name)
+            st.rerun()
+
+        st.divider()
         st.header("Simulation Controls")
-        steps = st.slider("Simulation length (steps)", min_value=60, max_value=720, value=240, step=10)
-        seed = st.number_input("Random seed", min_value=0, max_value=10_000, value=42, step=1)
-        noise = st.slider("Noise level", min_value=0.0, max_value=20.0, value=3.0, step=0.5)
+        st.slider("Simulation length (steps)", min_value=60, max_value=720, step=10, key="sim_steps")
+        st.number_input("Random seed", min_value=0, max_value=10000, step=1, key="sim_seed")
+        st.slider("Noise level", min_value=0.0, max_value=20.0, step=0.5, key="sim_noise")
 
         st.subheader("Eclipse")
-        enable_eclipse = st.checkbox("Enable eclipse cycle", value=True)
-        eclipse_period = st.slider("Eclipse period (steps)", 30, 180, 90, 5)
-        eclipse_duration = st.slider("Eclipse duration (steps)", 5, 80, 35, 1)
+        st.checkbox("Enable eclipse cycle", key="sim_enable_eclipse")
+        st.slider("Eclipse period (steps)", min_value=30, max_value=180, step=5, key="sim_eclipse_period")
+        st.slider("Eclipse duration (steps)", min_value=5, max_value=80, step=1, key="sim_eclipse_duration")
 
         st.subheader("Fault Injection")
-        manual_fault = st.selectbox("Manual fault", options=["none", "minor", "critical"], index=0)
-        manual_fault_step = st.slider("Manual fault step", min_value=0, max_value=steps - 1, value=min(steps - 1, 120), step=1)
-        random_fault_rate = st.slider(
-            "Random fault rate (faults/hour)", min_value=0.0, max_value=5.0, value=0.5, step=0.1
+        st.selectbox("Manual fault", options=["none", "minor", "critical"], key="sim_manual_fault")
+        if st.session_state["sim_manual_fault_step"] > st.session_state["sim_steps"] - 1:
+            st.session_state["sim_manual_fault_step"] = st.session_state["sim_steps"] - 1
+        st.slider(
+            "Manual fault step",
+            min_value=0,
+            max_value=st.session_state["sim_steps"] - 1,
+            step=1,
+            key="sim_manual_fault_step",
+        )
+        st.slider(
+            "Random fault rate (faults/hour)",
+            min_value=0.0,
+            max_value=5.0,
+            step=0.1,
+            key="sim_random_fault_rate",
         )
 
-        st.subheader("Stability")
-        use_hysteresis = st.checkbox("Use hysteresis / minimum dwell", value=True)
-        min_dwell = st.slider("Min dwell steps", min_value=1, max_value=30, value=4, step=1)
-        recover_hold = st.slider("Recover hold steps", min_value=1, max_value=30, value=5, step=1)
+        st.subheader("Policy + Stability")
+        st.selectbox(
+            "Policy mode",
+            options=["rule_based", "risk_scored"],
+            key="sim_policy_mode",
+            help="rule_based uses explicit thresholds; risk_scored uses weighted risk factors.",
+        )
+        st.checkbox("Use hysteresis / minimum dwell", key="sim_use_hysteresis")
+        st.slider("Min dwell steps", min_value=1, max_value=30, step=1, key="sim_min_dwell")
+        st.slider("Recover hold steps", min_value=1, max_value=30, step=1, key="sim_recover_hold")
 
     cfg = SimConfig(
-        steps=steps,
-        seed=int(seed),
-        noise_level=noise,
-        enable_eclipse=enable_eclipse,
-        eclipse_period=eclipse_period,
-        eclipse_duration=eclipse_duration,
-        random_fault_rate=random_fault_rate,
-        manual_fault=manual_fault,
-        manual_fault_step=manual_fault_step,
-        use_hysteresis=use_hysteresis,
-        min_dwell_steps=min_dwell,
-        recover_hold_steps=recover_hold,
+        steps=int(st.session_state["sim_steps"]),
+        seed=int(st.session_state["sim_seed"]),
+        noise_level=float(st.session_state["sim_noise"]),
+        enable_eclipse=bool(st.session_state["sim_enable_eclipse"]),
+        eclipse_period=int(st.session_state["sim_eclipse_period"]),
+        eclipse_duration=int(st.session_state["sim_eclipse_duration"]),
+        random_fault_rate=float(st.session_state["sim_random_fault_rate"]),
+        manual_fault=str(st.session_state["sim_manual_fault"]),
+        manual_fault_step=int(st.session_state["sim_manual_fault_step"]),
+        use_hysteresis=bool(st.session_state["sim_use_hysteresis"]),
+        min_dwell_steps=int(st.session_state["sim_min_dwell"]),
+        recover_hold_steps=int(st.session_state["sim_recover_hold"]),
+        policy_mode=str(st.session_state["sim_policy_mode"]),
     )
 
     telemetry = simulate_telemetry(cfg)
     faults = generate_faults(cfg, telemetry)
     telemetry, transitions, timeline = run_state_machine(telemetry, faults, cfg)
 
-    focus_step = st.slider("Focus step (for inspection/screenshots)", 0, steps - 1, steps - 1, 1)
-    current = telemetry.iloc[focus_step]
+    state_steps = find_state_steps(telemetry)
+    if st.session_state["focus_step"] > cfg.steps - 1:
+        st.session_state["focus_step"] = cfg.steps - 1
 
-    left, right = st.columns([1, 2])
-    with left:
-        st.markdown(state_badge(current["state"]), unsafe_allow_html=True)
+    tab_sim, tab_exp, tab_submit = st.tabs(
+        [
+            "Live Simulator",
+            "Experiment Lab",
+            "Submission Pack",
+        ]
+    )
+
+    with tab_sim:
+        jump_cols = st.columns([2, 1])
+        with jump_cols[0]:
+            st.write("Quick Jump (recommended screenshot targets)")
+            st.selectbox(
+                "State target",
+                options=["NOMINAL", "THROTTLE", "SAFE", "RECOVER"],
+                key="tour_state_select",
+            )
+        with jump_cols[1]:
+            if st.button("Jump To Target Step"):
+                target = state_steps.get(st.session_state["tour_state_select"])
+                if target is not None:
+                    st.session_state["focus_step"] = int(target)
+                    st.rerun()
+                else:
+                    st.warning("This state was not reached in the current run.")
+
+        st.slider(
+            "Focus step (for inspection/screenshots)",
+            min_value=0,
+            max_value=cfg.steps - 1,
+            step=1,
+            key="focus_step",
+        )
+        current = telemetry.iloc[int(st.session_state["focus_step"])]
+
+        left, right = st.columns([1, 2])
+        with left:
+            st.markdown(state_badge(str(current["state"])), unsafe_allow_html=True)
+            st.caption(f"Step {int(current['step'])} | Time {current['timestamp']} | Eclipse={bool(current['eclipse'])}")
+            st.metric("Power (W)", f"{current['power_watts']:.1f}")
+            st.metric("Temp (C)", f"{current['temp_c']:.1f}")
+
+        with right:
+            st.subheader("Why am I in this state?")
+            for idx, reason in enumerate(str(current["active_rules"]).split("; "), start=1):
+                if reason.strip():
+                    st.write(f"{idx}. {reason.strip()}")
+
+        m = compute_run_metrics(telemetry, transitions, timeline)
+        metric_cols = st.columns(6)
+        metric_cols[0].metric("Fault Events", f"{int(m['fault_events'])}")
+        metric_cols[1].metric("Transitions", f"{int(m['transitions'])}")
+        metric_cols[2].metric("Transitions/Hour", f"{m['transitions_per_hour']:.1f}")
+        metric_cols[3].metric("SAFE %", f"{m['safe_pct']:.1f}%")
+        metric_cols[4].metric("RECOVER %", f"{m['recover_pct']:.1f}%")
+        metric_cols[5].metric("Flapping Index", f"{m['flapping_index']:.2f}")
+
+        st.subheader("Telemetry")
+        st.line_chart(telemetry.set_index("step")[["power_watts", "temp_c"]], height=300)
+
+        st.subheader("State Timeline (table view)")
+        st.dataframe(
+            telemetry[["step", "timestamp", "state", "power_watts", "temp_c", "eclipse"]],
+            use_container_width=True,
+            height=250,
+        )
+
+        st.subheader("Event Log")
+        last_n = st.slider("Show last N events", min_value=5, max_value=200, value=25, step=5)
+        if timeline.empty:
+            st.info("No faults or state transitions were generated for this run.")
+        else:
+            tagged = timeline.copy()
+            tagged["severity_tag"] = tagged["severity"].apply(lambda x: f"[{x}]")
+            st.dataframe(tagged.tail(last_n), use_container_width=True, height=250)
+
+        st.subheader("State Transition Log")
+        if transitions.empty:
+            st.info("No state transitions occurred in this run.")
+        else:
+            st.dataframe(transitions, use_container_width=True, height=220)
+
+        combined_export = make_combined_export(telemetry, timeline)
+        st.download_button(
+            "Download telemetry + events CSV",
+            data=combined_export.to_csv(index=False).encode("utf-8"),
+            file_name="mocp_sim_export.csv",
+            mime="text/csv",
+        )
+
+    with tab_exp:
+        st.subheader("Monte Carlo Experiment Lab")
         st.caption(
-            f"Step {int(current['step'])} | Time {current['timestamp']} | Eclipse={bool(current['eclipse'])}"
+            "Runs repeated seeded simulations across policy modes and hysteresis settings to quantify stability and safety behavior."
         )
-        st.metric("Power (W)", f"{current['power_watts']:.1f}")
-        st.metric("Temp (C)", f"{current['temp_c']:.1f}")
+        exp_cols = st.columns(4)
+        exp_seeds = exp_cols[0].slider("Seeds", min_value=10, max_value=200, value=60, step=10)
+        exp_steps = exp_cols[1].slider("Steps/Run", min_value=120, max_value=480, value=240, step=20)
+        exp_noise = exp_cols[2].slider("Noise", min_value=1.0, max_value=8.0, value=3.5, step=0.5)
+        exp_rate = exp_cols[3].slider("Faults/Hour", min_value=0.0, max_value=5.0, value=1.2, step=0.1)
 
-    with right:
-        st.subheader("Why am I in this state?")
-        for idx, reason in enumerate(str(current["active_rules"]).split("; "), start=1):
-            if reason.strip():
-                st.write(f"{idx}. {reason.strip()}")
+        exp_cols2 = st.columns(4)
+        exp_manual_fault = exp_cols2[0].selectbox("Manual fault for all runs", ["none", "minor", "critical"], index=1)
+        exp_manual_step = exp_cols2[1].slider("Manual fault step", min_value=0, max_value=exp_steps - 1, value=exp_steps // 2, step=1)
+        exp_dwell = exp_cols2[2].slider("Min dwell", min_value=1, max_value=12, value=4, step=1)
+        exp_recover = exp_cols2[3].slider("Recover hold", min_value=1, max_value=12, value=5, step=1)
 
-    st.subheader("Telemetry")
-    st.line_chart(
-        telemetry.set_index("step")[["power_watts", "temp_c"]],
-        height=300,
-    )
+        run_now = st.button("Run Monte Carlo")
+        if run_now:
+            raw, summary = run_experiment_grid(
+                seeds=exp_seeds,
+                steps=exp_steps,
+                noise_level=exp_noise,
+                random_fault_rate=exp_rate,
+                manual_fault=exp_manual_fault,
+                manual_fault_step=exp_manual_step,
+                min_dwell_steps=exp_dwell,
+                recover_hold_steps=exp_recover,
+            )
 
-    st.subheader("State Timeline (table view)")
-    timeline_view = telemetry[["step", "timestamp", "state", "power_watts", "temp_c", "eclipse"]].copy()
-    st.dataframe(timeline_view, use_container_width=True, height=250)
+            st.success(f"Completed {len(raw)} runs ({exp_seeds} seeds x 2 policies x 2 hysteresis settings).")
+            st.dataframe(summary, use_container_width=True, height=220)
 
-    st.subheader("Event Log")
-    last_n = st.slider("Show last N events", min_value=5, max_value=200, value=25, step=5)
+            chart = summary.copy()
+            chart["mode"] = chart["policy_mode"] + " | hyst=" + chart["use_hysteresis"].astype(str)
+            chart = chart.set_index("mode")
+            st.bar_chart(chart[["transitions_avg", "safe_pct_avg", "flapping_index_avg"]], height=300)
 
-    if timeline.empty:
-        st.info("No faults or state transitions were generated for this run.")
-    else:
-        tagged = timeline.copy()
-        tagged["severity_tag"] = tagged["severity"].apply(lambda x: f"[{x}]")
-        st.dataframe(tagged.tail(last_n), use_container_width=True, height=260)
+            st.download_button(
+                "Download experiment raw CSV",
+                data=raw.to_csv(index=False).encode("utf-8"),
+                file_name="mocp_experiment_raw.csv",
+                mime="text/csv",
+            )
+            st.download_button(
+                "Download experiment summary CSV",
+                data=summary.to_csv(index=False).encode("utf-8"),
+                file_name="mocp_experiment_summary.csv",
+                mime="text/csv",
+            )
 
-    st.subheader("Timeline View (all events, sorted by time)")
-    if timeline.empty:
-        st.info("No timeline events to display.")
-    else:
-        tagged_full = timeline.copy()
-        tagged_full["severity_tag"] = tagged_full["severity"].apply(lambda x: f"[{x}]")
-        st.dataframe(tagged_full, use_container_width=True, height=260)
+            best_rows = summary.sort_values("transitions_avg").head(1)
+            if not best_rows.empty:
+                best = best_rows.iloc[0]
+                st.info(
+                    "Lowest transition regime in this run: "
+                    f"policy={best['policy_mode']}, hysteresis={best['use_hysteresis']}, "
+                    f"avg_transitions={best['transitions_avg']:.2f}"
+                )
+        else:
+            st.info("Click 'Run Monte Carlo' to generate experiment metrics.")
 
-    st.subheader("State Transition Log")
-    if transitions.empty:
-        st.info("No state transitions occurred in this run.")
-    else:
-        st.dataframe(transitions, use_container_width=True, height=220)
+    with tab_submit:
+        st.subheader("Screenshot Plan")
+        plan_df = make_screenshot_plan(cfg, state_steps)
+        st.dataframe(plan_df, use_container_width=True, height=210)
+        st.download_button(
+            "Download screenshot checklist CSV",
+            data=plan_df.to_csv(index=False).encode("utf-8"),
+            file_name="mocp_screenshot_plan.csv",
+            mime="text/csv",
+        )
 
-    combined_export = make_combined_export(telemetry, timeline)
-    csv_bytes = combined_export.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download telemetry + events CSV",
-        data=csv_bytes,
-        file_name="mocp_sim_export.csv",
-        mime="text/csv",
-    )
+        st.subheader("Service Blueprint / Pilot Workflow")
+        blueprint_df = pd.DataFrame(SERVICE_BLUEPRINT_ROWS)
+        st.dataframe(blueprint_df, use_container_width=True, height=230)
+        st.download_button(
+            "Download service blueprint CSV",
+            data=blueprint_df.to_csv(index=False).encode("utf-8"),
+            file_name="mocp_service_blueprint.csv",
+            mime="text/csv",
+        )
 
-    st.subheader("Service Blueprint / Pilot Workflow")
-    blueprint_df = pd.DataFrame(SERVICE_BLUEPRINT_ROWS)
-    st.dataframe(blueprint_df, use_container_width=True, height=220)
-    st.download_button(
-        "Download service blueprint CSV",
-        data=blueprint_df.to_csv(index=False).encode("utf-8"),
-        file_name="mocp_service_blueprint.csv",
-        mime="text/csv",
-    )
+        st.subheader("Guided Demo + Video Tour Assets")
+        tour_md, tour_json = build_tour_assets(cfg, state_steps)
+        st.code(tour_md, language="markdown")
+        c1, c2 = st.columns(2)
+        c1.download_button(
+            "Download tour script (.md)",
+            data=tour_md.encode("utf-8"),
+            file_name="mocp_demo_tour.md",
+            mime="text/markdown",
+        )
+        c2.download_button(
+            "Download tour scenes (.json)",
+            data=tour_json.encode("utf-8"),
+            file_name="mocp_demo_tour.json",
+            mime="application/json",
+        )
 
-    st.subheader("5-Minute Demo Script")
-    for idx, step in enumerate(DEMO_SCRIPT_STEPS, start=1):
-        st.write(f"{idx}. {step}")
-
-    with st.expander("Report-Ready MVP Description (2-4 sentences)", expanded=False):
+        st.subheader("Report-Ready MVP Description (2-4 sentences)")
         st.markdown(
-            "We built an interactive Streamlit prototype of a Managed Onboard Compute Payload (MOCP) "
-            "safety workflow for teams exploring onboard autonomy operations. "
-            "The prototype simulates power and temperature telemetry, supports manual/random fault injection, "
-            "and visualizes state transitions across NOMINAL, THROTTLE, SAFE, and RECOVER. "
-            "It is intended for CubeSat teams and space-software builders who need to reason about fault "
-            "handling behavior before investing in full flight implementations. "
-            "The core assumption under test is that transparent transition logic increases operator trust "
-            "and speeds incident triage."
+            "We built an interactive Streamlit prototype of a Managed Onboard Compute Payload (MOCP) safety workflow for teams exploring onboard autonomy operations. "
+            "The prototype simulates power and temperature telemetry, supports manual/random fault injection, and visualizes transitions across NOMINAL, THROTTLE, SAFE, and RECOVER. "
+            "It adds reason-level explainability, hysteresis controls, and experiment tooling so users can evaluate stability, trust, and incident triage behavior. "
+            "The core assumption under test is that explicit transition transparency improves operator confidence and operational decision speed."
         )
 
-    with st.expander("README / Usage Notes", expanded=False):
-        st.markdown(README_TEXT)
+        with st.expander("README / Usage Notes", expanded=False):
+            st.markdown(README_TEXT)
 
 
 if __name__ == "__main__":
