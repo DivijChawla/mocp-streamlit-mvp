@@ -37,14 +37,10 @@ def main() -> None:
         page.goto(APP_URL, wait_until="networkidle", timeout=120000)
         page.get_by_text("Managed Onboard Compute Payload (MOCP) - Prototype MVP").wait_for(timeout=30000)
 
-        # Onboarding tab screenshot
+        # Onboarding page screenshot
         onboarding_out = OUT / "00_onboarding.png"
-        page.get_by_role("tab", name="Client Onboarding").click(timeout=10000)
+        choose_page(page, "Client Onboarding")
         page.wait_for_timeout(1000)
-        page.get_by_label("Email").fill("demo.operator@ods.local")
-        page.get_by_role("textbox", name="Password").fill("ODS-demo-2026!")
-        page.get_by_role("button", name="Sign In with Demo Credentials").click(timeout=10000)
-        page.wait_for_timeout(1200)
         page.screenshot(path=str(onboarding_out), full_page=True)
         print(f"saved {onboarding_out}")
 

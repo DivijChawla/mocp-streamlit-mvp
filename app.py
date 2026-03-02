@@ -30,19 +30,6 @@ APP_VALUE_PROP = (
     "operational explainability, and policy stability under constrained conditions."
 )
 
-DEMO_CREDENTIALS = [
-    {
-        "role": "Operator",
-        "email": "demo.operator@ods.local",
-        "password": "ODS-demo-2026!",
-    },
-    {
-        "role": "Mission Analyst",
-        "email": "mission.analyst@ods.local",
-        "password": "ODS-analyst-2026!",
-    },
-]
-
 README_TEXT = """
 # Managed Onboard Compute Payload (MOCP) Prototype MVP
 
@@ -55,23 +42,12 @@ README_TEXT = """
 - State machine observability (`NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`) with explanation traces.
 - Monte Carlo experiment lab to quantify stability and switching behavior.
 - Exportable telemetry and experiment CSV for customer analysis workflows.
-- Separate onboarding page with optional Google sign-in and demo fallback credentials.
-
-## Access
-- Preferred: Sign in with Google (OIDC) when deployment auth is configured.
-- Fallback demo accounts:
-- `demo.operator@ods.local` / `ODS-demo-2026!`
-- `mission.analyst@ods.local` / `ODS-analyst-2026!`
+- Separate onboarding page for guided first-time walkthrough.
 
 ## Run Locally (macOS)
 ```bash
 pip install streamlit pandas numpy
 streamlit run app.py
-```
-
-Optional for Google sign-in:
-```bash
-pip install "Authlib>=1.3.2"
 ```
 """
 
@@ -208,14 +184,8 @@ def ensure_state_defaults() -> None:
         st.session_state["focus_step"] = 239
     if "tour_state_select" not in st.session_state:
         st.session_state["tour_state_select"] = "NOMINAL"
-    if "demo_authenticated" not in st.session_state:
-        st.session_state["demo_authenticated"] = False
-    if "demo_user_email" not in st.session_state:
-        st.session_state["demo_user_email"] = DEMO_CREDENTIALS[0]["email"]
-    if "demo_user_password" not in st.session_state:
-        st.session_state["demo_user_password"] = ""
     if "app_page" not in st.session_state:
-        st.session_state["app_page"] = "Client Onboarding"
+        st.session_state["app_page"] = "Mission Console"
     if "settings_loaded" not in st.session_state:
         apply_preset(st.session_state["preset_name"])
         st.session_state["settings_loaded"] = True
@@ -619,75 +589,12 @@ def find_state_steps(telemetry: pd.DataFrame) -> Dict[str, Optional[int]]:
     return out
 
 
-def check_demo_login(email: str, password: str) -> bool:
-    for cred in DEMO_CREDENTIALS:
-        if email.strip().lower() == cred["email"].lower() and password == cred["password"]:
-            return True
-    return False
-
-
-def google_auth_supported() -> bool:
-    return all(hasattr(st, attr) for attr in ["login", "user", "logout"])
-
-
-def google_auth_configured() -> bool:
-    try:
-        auth_cfg = st.secrets.get("auth", {})
-    except Exception:
-        return False
-
-    if not isinstance(auth_cfg, dict):
-        return False
-
-    shared_keys = {"redirect_uri", "cookie_secret"}
-    has_shared = shared_keys.issubset(set(auth_cfg.keys()))
-
-    root_provider_keys = {"client_id", "client_secret", "server_metadata_url"}
-    if has_shared and root_provider_keys.issubset(set(auth_cfg.keys())):
-        return True
-
-    google_cfg = auth_cfg.get("google", {})
-    if isinstance(google_cfg, dict) and has_shared:
-        return root_provider_keys.issubset(set(google_cfg.keys()))
-
-    return False
-
-
-def google_auth_context() -> Tuple[bool, str]:
-    if not google_auth_supported():
-        return False, ""
-
-    try:
-        logged_in = bool(getattr(st.user, "is_logged_in", False))
-    except Exception:
-        return False, ""
-
-    if not logged_in:
-        return False, ""
-
-    identity = ""
-    for key in ["email", "name", "sub"]:
-        try:
-            value = st.user.get(key, "")
-        except Exception:
-            value = ""
-        if value:
-            identity = str(value)
-            break
-    return True, identity
-
-
-def user_authenticated() -> bool:
-    google_logged_in, _ = google_auth_context()
-    return google_logged_in or bool(st.session_state.get("demo_authenticated", False))
-
-
 def onboarding_steps_df() -> pd.DataFrame:
     rows = [
         {
             "step": 1,
-            "action": "Sign in with Google (or use demo fallback)",
-            "outcome": "Unlocks mission console features for evaluation users.",
+            "action": "Open onboarding overview",
+            "outcome": "Introduces scenario workflow and expected outcomes.",
         },
         {
             "step": 2,
@@ -844,83 +751,22 @@ def state_badge(state: str) -> str:
     """
 
 
-def get_credential_reference_text() -> str:
-    lines = ["Fallback demo credentials:"]
-    for cred in DEMO_CREDENTIALS:
-        lines.append(f"- {cred['role']}: {cred['email']} / {cred['password']}")
-    return "\n".join(lines)
-
-
 def render_onboarding_page() -> None:
     st.subheader("Client Onboarding")
     st.write(
-        "Use this page to sign in, review workflow steps, and then switch to the mission console for scenario runs."
+        "Use this page to review workflow steps, then switch to the mission console for scenario runs."
     )
 
-    c_left, c_right = st.columns([1, 1])
-    google_logged_in, google_identity = google_auth_context()
+    st.markdown("**Onboarding Workflow**")
+    st.dataframe(onboarding_steps_df(), use_container_width=True, height=260)
+    st.markdown("**Quick Start**")
+    st.write("1. Switch page to `Mission Console` from the sidebar.")
+    st.write("2. Apply `Balanced Demo` and inspect transitions in `Live Simulator`.")
+    st.write("3. Run Monte Carlo in `Experiment Lab` and export results.")
 
-    with c_left:
-        st.markdown("**Access**")
-        if google_auth_supported():
-            st.caption("Google Sign-In (OIDC)")
-            if google_logged_in:
-                identity = google_identity if google_identity else "authenticated Google user"
-                st.success(f"Signed in with Google as `{identity}`.")
-                if st.button("Sign Out of Google", key="google_logout_button"):
-                    st.logout()
-            else:
-                google_ready = google_auth_configured()
-                if st.button(
-                    "Sign In with Google",
-                    type="primary",
-                    key="google_login_button",
-                    disabled=not google_ready,
-                ):
-                    try:
-                        st.login("google")
-                    except TypeError:
-                        try:
-                            st.login()
-                        except Exception:
-                            st.warning("Google sign-in failed to start. Verify OIDC secrets and try again.")
-                    except Exception:
-                        st.warning("Google sign-in failed to start. Verify OIDC secrets and try again.")
-                if not google_ready:
-                    st.info(
-                        "Google sign-in is not enabled on this deployment yet. "
-                        "Use demo credentials below or configure `[auth]` in Streamlit secrets."
-                    )
-        else:
-            st.info("Google sign-in is not available in this runtime.")
-
-        st.divider()
-        st.markdown("**Fallback Demo Access**")
-        st.code(get_credential_reference_text(), language="text")
-        with st.form("demo_login_form"):
-            email = st.text_input("Email", key="demo_user_email")
-            password = st.text_input("Password", type="password", key="demo_user_password")
-            submit = st.form_submit_button("Sign In with Demo Credentials")
-        if submit:
-            st.session_state["demo_authenticated"] = check_demo_login(email, password)
-        if st.session_state["demo_authenticated"]:
-            st.success("Signed in with demo credentials.")
-        else:
-            st.info("Use one of the fallback demo credentials above.")
-
-    with c_right:
-        st.markdown("**Onboarding Workflow**")
-        st.dataframe(onboarding_steps_df(), use_container_width=True, height=260)
-        st.markdown("**Quick Start**")
-        st.write("1. Authenticate on this page.")
-        st.write("2. Switch page to `Mission Console` from the sidebar.")
-        st.write("3. Apply `Balanced Demo` and inspect transitions in `Live Simulator`.")
-        st.write("4. Run Monte Carlo in `Experiment Lab` and export results.")
-
-    if user_authenticated():
-        if st.button("Open Mission Console", key="open_console_button"):
-            st.session_state["app_page"] = "Mission Console"
-            st.rerun()
+    if st.button("Open Mission Console", key="open_console_button"):
+        st.session_state["app_page"] = "Mission Console"
+        st.rerun()
 
 
 def main() -> None:
@@ -929,20 +775,9 @@ def main() -> None:
     st.title("Managed Onboard Compute Payload (MOCP) - Prototype MVP")
     st.caption(APP_VALUE_PROP)
 
-    google_logged_in, google_identity = google_auth_context()
-    demo_logged_in = bool(st.session_state.get("demo_authenticated", False))
-
     with st.sidebar:
         st.header("Navigation")
         st.radio("Page", options=["Mission Console", "Client Onboarding"], key="app_page")
-
-        if google_logged_in:
-            identity = google_identity if google_identity else "authenticated Google user"
-            st.success(f"Signed in (Google): {identity}")
-        elif demo_logged_in:
-            st.success("Signed in (demo credentials)")
-        else:
-            st.warning("Not signed in")
 
         if st.session_state["app_page"] == "Mission Console":
             st.divider()
@@ -998,11 +833,6 @@ def main() -> None:
 
     if st.session_state["app_page"] == "Client Onboarding":
         render_onboarding_page()
-        return
-
-    if not user_authenticated():
-        st.warning("Mission Console is gated behind sign-in.")
-        st.info("Open `Client Onboarding` from the sidebar to authenticate.")
         return
 
     cfg = SimConfig(

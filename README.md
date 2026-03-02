@@ -26,53 +26,18 @@ Core states:
 - Monte Carlo experiment lab with CSV exports.
 - Separate onboarding page from mission console for cleaner UI.
 
-## Access options
-Preferred in hosted environments:
-- Google sign-in via Streamlit OIDC (`st.login` / `st.user` / `st.logout`) when auth secrets are configured.
-
-Fallback demo accounts:
-- Operator: `demo.operator@ods.local` / `ODS-demo-2026!`
-- Mission Analyst: `mission.analyst@ods.local` / `ODS-analyst-2026!`
-
 ## Run locally
 ```bash
 pip install streamlit pandas numpy
 streamlit run app.py
 ```
 
-For local Google sign-in support, also install:
-```bash
-pip install "Authlib>=1.3.2"
-```
-
 ## Onboarding flow
 1. Open the `Client Onboarding` page.
-2. Sign in with Google (if configured) or use demo fallback credentials.
-3. Switch sidebar page to `Mission Console`.
-4. Apply a scenario preset from the sidebar.
-5. Review transitions in `Live Simulator`.
-6. Run policy comparisons in `Experiment Lab`.
-
-## Optional Google sign-in setup
-The app is already wired for Streamlit's built-in OIDC login.
-
-1. In Google Cloud Console, create OAuth credentials and allow redirect URI:
-   - `https://mocp--mvp.streamlit.app/oauth2callback`
-2. In Streamlit Community Cloud, open app settings -> `Secrets` and add:
-
-```toml
-[auth]
-redirect_uri = "https://mocp--mvp.streamlit.app/oauth2callback"
-cookie_secret = "replace-with-long-random-secret"
-
-[auth.google]
-client_id = "your-google-client-id"
-client_secret = "your-google-client-secret"
-server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-```
-
-3. Redeploy/restart app.
-4. `Sign In with Google` is enabled automatically when these keys are present.
+2. Switch sidebar page to `Mission Console`.
+3. Apply a scenario preset from the sidebar.
+4. Review transitions in `Live Simulator`.
+5. Run policy comparisons in `Experiment Lab`.
 
 ## Reproducible evaluation suite
 ```bash
