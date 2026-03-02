@@ -1,20 +1,10 @@
 # Managed Onboard Compute Payload (MOCP) Prototype MVP
 
-## Disclaimer (Read First)
-This app is for **UI/workflow validation only**.
-It is **not flight software**, **not a physics-accurate spacecraft simulator**, and must not be used for mission-critical decisions.
-
 ## What Is Simulated
 - Synthetic telemetry for `power_watts` and `temp_c` with periodic behavior and configurable noise.
 - Eclipse cycles that reduce power and cool temperature.
 - Fault injection (manual and random) using labels: `sensor_dropout`, `watchdog_timeout`, `bitflip`.
 - Safety state machine with states: `NOMINAL`, `THROTTLE`, `SAFE`, `RECOVER`.
-
-## What Is Not Claimed
-- No orbital-mechanics fidelity.
-- No realistic thermal/power subsystem fidelity.
-- No certified FDIR logic.
-- No flight readiness claim.
 
 ## Requirements
 ```bash
