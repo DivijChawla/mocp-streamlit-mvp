@@ -55,9 +55,24 @@ pip install "Authlib>=1.3.2"
 
 ## Optional Google sign-in setup
 The app is already wired for Streamlit's built-in OIDC login.
-- Configure OIDC provider details in deployment secrets.
-- Once configured, `Sign In with Google` becomes active on onboarding.
-- No additional Python dependency is required.
+
+1. In Google Cloud Console, create OAuth credentials and allow redirect URI:
+   - `https://mocp--mvp.streamlit.app/oauth2callback`
+2. In Streamlit Community Cloud, open app settings -> `Secrets` and add:
+
+```toml
+[auth]
+redirect_uri = "https://mocp--mvp.streamlit.app/oauth2callback"
+cookie_secret = "replace-with-long-random-secret"
+
+[auth.google]
+client_id = "your-google-client-id"
+client_secret = "your-google-client-secret"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+```
+
+3. Redeploy/restart app.
+4. `Sign In with Google` is enabled automatically when these keys are present.
 
 ## Reproducible evaluation suite
 ```bash

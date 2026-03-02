@@ -630,6 +630,29 @@ def google_auth_supported() -> bool:
     return all(hasattr(st, attr) for attr in ["login", "user", "logout"])
 
 
+def google_auth_configured() -> bool:
+    try:
+        auth_cfg = st.secrets.get("auth", {})
+    except Exception:
+        return False
+
+    if not isinstance(auth_cfg, dict):
+        return False
+
+    shared_keys = {"redirect_uri", "cookie_secret"}
+    has_shared = shared_keys.issubset(set(auth_cfg.keys()))
+
+    root_provider_keys = {"client_id", "client_secret", "server_metadata_url"}
+    if has_shared and root_provider_keys.issubset(set(auth_cfg.keys())):
+        return True
+
+    google_cfg = auth_cfg.get("google", {})
+    if isinstance(google_cfg, dict) and has_shared:
+        return root_provider_keys.issubset(set(google_cfg.keys()))
+
+    return False
+
+
 def google_auth_context() -> Tuple[bool, str]:
     if not google_auth_supported():
         return False, ""
@@ -847,16 +870,27 @@ def render_onboarding_page() -> None:
                 if st.button("Sign Out of Google", key="google_logout_button"):
                     st.logout()
             else:
-                if st.button("Sign In with Google", type="primary", key="google_login_button"):
+                google_ready = google_auth_configured()
+                if st.button(
+                    "Sign In with Google",
+                    type="primary",
+                    key="google_login_button",
+                    disabled=not google_ready,
+                ):
                     try:
                         st.login("google")
                     except TypeError:
                         try:
                             st.login()
-                        except Exception as exc:
-                            st.warning(f"Google sign-in is not configured yet: {exc}")
-                    except Exception as exc:
-                        st.warning(f"Google sign-in is not configured yet: {exc}")
+                        except Exception:
+                            st.warning("Google sign-in failed to start. Verify OIDC secrets and try again.")
+                    except Exception:
+                        st.warning("Google sign-in failed to start. Verify OIDC secrets and try again.")
+                if not google_ready:
+                    st.info(
+                        "Google sign-in is not enabled on this deployment yet. "
+                        "Use demo credentials below or configure `[auth]` in Streamlit secrets."
+                    )
         else:
             st.info("Google sign-in is not available in this runtime.")
 
