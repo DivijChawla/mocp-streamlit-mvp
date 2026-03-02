@@ -68,6 +68,11 @@ README_TEXT = """
 pip install streamlit pandas numpy
 streamlit run app.py
 ```
+
+Optional for Google sign-in:
+```bash
+pip install "Authlib>=1.3.2"
+```
 """
 
 PRESETS: Dict[str, Dict[str, object]] = {

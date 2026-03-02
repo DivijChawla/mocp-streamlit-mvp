@@ -40,6 +40,11 @@ pip install streamlit pandas numpy
 streamlit run app.py
 ```
 
+For local Google sign-in support, also install:
+```bash
+pip install "Authlib>=1.3.2"
+```
+
 ## Onboarding flow
 1. Open the `Client Onboarding` page.
 2. Sign in with Google (if configured) or use demo fallback credentials.
