@@ -4,6 +4,8 @@ __pycache__/
 .DS_Store
 .streamlit/
 evaluation_*.csv
+!evaluation_v2_summary.csv
+!evaluation_v2_raw.csv
 mocp_experiment_*.csv
 mocp_sim_export.csv
 mocp_screenshot_plan.csv
